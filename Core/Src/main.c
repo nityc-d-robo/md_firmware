@@ -160,7 +160,10 @@ static void MX_CAN_Init(void)
 {
 
   /* USER CODE BEGIN CAN_Init 0 */
-
+	CAN_FilterTypeDef filter;
+	uint32_t id_sw = 0u;
+	uint32_t id_all = 0x100 << 21;		//共通ID(非常停止用)
+	uint32_t id_own = 0u;				//基板のID
   /* USER CODE END CAN_Init 0 */
 
   /* USER CODE BEGIN CAN_Init 1 */
@@ -183,7 +186,24 @@ static void MX_CAN_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN CAN_Init 2 */
+  id_sw += (uint32_t)(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0)) << 3;
+  id_sw += (uint32_t)(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_1)) << 2;
+  id_sw += (uint32_t)(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_2)) << 1;
+  id_sw += (uint32_t)(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_3));
 
+  id_own = id_sw << 21;
+  filter.FilterIdHigh         = id_all >> 16;
+  filter.FilterIdLow          = id_all;
+  filter.FilterMaskIdHigh     = id_own >> 16;
+  filter.FilterMaskIdLow      = id_own;
+  filter.FilterScale          = CAN_FILTERSCALE_32BIT;
+  filter.FilterFIFOAssignment = CAN_FILTER_FIFO0;
+  filter.FilterBank           = 0;
+  filter.FilterMode           = CAN_FILTERMODE_IDLIST;
+  filter.SlaveStartFilterBank = 14;
+  filter.FilterActivation     = ENABLE;
+
+  HAL_CAN_ConfigFilter(&hcan, &filter);
   /* USER CODE END CAN_Init 2 */
 
 }
