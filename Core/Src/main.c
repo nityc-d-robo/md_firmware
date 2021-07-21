@@ -56,7 +56,11 @@ static void MX_CAN_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
-
+void simplePWM(bool phase_, uint16_t power_);
+void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_);
+void stopAll(void);
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_);
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -339,7 +343,88 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void simplePWM(bool phase_, uint16_t power_){
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, phase_);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, power_);
+}
 
+void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
+	float rpm = (float)(rpm_/128.0f);
+	float end = (float)(end_/128.0f);
+	int pre_overflow = 0;
+	uint32_t now_speed = 0;
+	uint16_t enc_cnt = 0;
+	uint16_t pre_cnt = 0;
+
+	RingBuf speeds;
+
+	speeds.buf_num = 4u;
+	speeds.now_point = 0u;
+	speeds.buf = calloc(speeds.buf_num, sizeof(uint16_t));
+	if(speeds.buf == NULL){
+		stopAll();
+	}
+
+	pre_cnt = TIM2 -> CNT;
+	pre_overflow = overflow;
+	HAL_Delay(100);
+	while(nvic_flag){
+		enc_cnt = TIM2 -> CNT + (overflow - pre_overflow) * 65535;
+		now_speed = abs(enc_cnt - pre_cnt);
+		speeds.buf[speeds.now_point++] = now_speed;
+		if(speeds.now_point >= speeds.buf_num){
+			speeds.now_point = 0;
+		}
+
+	}
+
+	free(speeds.buf);
+}
+
+void stopAll(void){
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, RESET);
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_){
+	if(htim_->Instance == TIM2){
+		__HAL_TIM_CLEAR_FLAG(&htim2, TIM_IT_UPDATE);
+		if(__HAL_TIM_IS_TIM_COUNTING_DOWN(&htim2)){
+			overflow--;
+		}else{
+			overflow++;
+		}
+	}
+}
+
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
+	CAN_RxHeaderTypeDef RxHeader;
+	uint32_t receive_id = 0u;
+	uint8_t rx_data[8] = { 0u };
+	if (HAL_CAN_GetRxMessage(hcan_, CAN_RX_FIFO0, &RxHeader, rx_data) == HAL_OK){
+		receive_id = (RxHeader.IDE == CAN_ID_STD)? RxHeader.StdId : RxHeader.ExtId;
+		if(receive_id == 0x100){
+			stopAll();
+		}else{
+			nvic_flag = true;
+			switch(rx_data[0]){
+				case PWM:
+					simplePWM((bool)rx_data[1], ((uint16_t)(rx_data[2])<<8 | rx_data[3]));
+					break;
+				case SPEED:
+					break;
+				case ANGLE:
+					break;
+				case LIM_SW:
+					break;
+				default:
+					stopAll();
+					break;
+			}
+		}
+	}
+	nvic_flag = false;
+}
 /* USER CODE END 4 */
 
 /**
