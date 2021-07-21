@@ -29,7 +29,15 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+typedef enum Mode{
+	PWM, SPEED, ANGLE, LIM_SW
+}Mode;
 
+typedef struct RingBuf{
+	uint8_t now_point;		//now point of ring buffer
+	uint8_t buf_num;			//amount of ring buffer
+	uint16_t *buf;
+}RingBuf;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -67,7 +75,9 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+bool nvic_flag = false;					//flag for execution permission
+int overflow = 0;
+unsigned long int encoder_cnt = 0u;
 /* USER CODE END 0 */
 
 /**
@@ -374,9 +384,16 @@ void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 	float rpm = (float)(rpm_/128.0f);
 	float end = (float)(end_/128.0f);
 	int pre_overflow = 0;
+	uint16_t power = 0;
+	uint16_t pre_power = 0;
+	float target_speed = (rpm*192)/600;
 	uint32_t now_speed = 0;
+	uint32_t average_speed = 0;
 	uint16_t enc_cnt = 0;
 	uint16_t pre_cnt = 0;
+	uint16_t first_cnt = 0;
+	uint32_t end_cnt = (uint32_t)(end * 192);
+
 
 	RingBuf speeds;
 
@@ -387,19 +404,35 @@ void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 		stopAll();
 	}
 
-	pre_cnt = TIM2 -> CNT;
+	first_cnt = TIM2 -> CNT;
+	pre_cnt = first_cnt;
 	pre_overflow = overflow;
 	HAL_Delay(100);
 	while(nvic_flag){
 		enc_cnt = TIM2 -> CNT + (overflow - pre_overflow) * 65535;
+		if((abs)(enc_cnt - first_cnt) > end){
+			stopAll();
+			break;
+		}
 		now_speed = abs(enc_cnt - pre_cnt);
 		speeds.buf[speeds.now_point++] = now_speed;
 		if(speeds.now_point >= speeds.buf_num){
 			speeds.now_point = 0;
 		}
-
+		average_speed = (speeds.buf[0] + speeds.buf[1] + speeds.buf[2] + speeds.buf[3]) / 4;
+		P = ((target_speed - average_speed) / target_speed) * 50;
+		power = (uint16_t)(pre_power + P);
+		if(power > 999){
+			power = 999;
+		}
+		if(power < 50 || (enc_cnt == first_cnt) || (rpm != 0)){
+			power = 50;
+		}
+		simplePWM(phase_, power);
+		HAL_Delay(100);
+		pre_cnt = enc_cnt;
+		pre_power = power;
 	}
-
 	free(speeds.buf);
 }
 
