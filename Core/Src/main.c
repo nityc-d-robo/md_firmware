@@ -44,7 +44,7 @@ typedef struct RingBuf{
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define SPR 48
-#define SPEED_P 50;
+#define SPEED_P 50
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -71,8 +71,10 @@ static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 void simplePWM(bool phase_, uint16_t power_);
 void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_);
+void limitSwitch(bool phase_, uint16_t power_, uint8_t port_);
 void stopAll(void);
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_);
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_);
 /* USER CODE END PFP */
 
@@ -80,6 +82,8 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_);
 /* USER CODE BEGIN 0 */
 bool nvic_flag = false;					//flag for execution permission
 int overflow = 0;
+int sw_flag1 = 0;
+int sw_flag2 = 0;
 unsigned long int encoder_cnt = 0u;
 /* USER CODE END 0 */
 
@@ -124,6 +128,8 @@ int main(void)
   __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, SET);
   overflow = 0;
+  sw_flag1 = 0;
+  sw_flag2 = 0;
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -393,21 +399,21 @@ void simplePWM(bool phase_, uint16_t power_){
 }
 
 void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
-	float rpm = (float)(rpm_/128.0f);
-	float end = (float)(end_/128.0f);
 	int pre_overflow = 0;
 	uint16_t power = 0u;
 	uint16_t pre_power = 0u;
-	float target_speed = (rpm*SPR*4)/600;
+	float target_speed = (float)((rpm_*SPR*4)/600);
 	uint32_t now_speed = 0u;
 	uint32_t average_speed = 0u;
 	uint16_t enc_cnt = 0u;
 	uint16_t pre_cnt = 0u;
 	uint16_t first_cnt = 0u;
 	uint32_t propotion = 0u;
-	uint32_t end_cnt = (uint32_t)(end * 192);
+	uint32_t end_cnt = (uint32_t)(end_*SPR*4);
 
 	RingBuf speeds;
+
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, RESET);
 
 	speeds.buf_num = 4u;
 	speeds.now_point = 0u;
@@ -421,13 +427,14 @@ void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 	pre_overflow = overflow;
 	HAL_Delay(100);
 	while(nvic_flag){
-		enc_cnt = TIM2 -> CNT + (overflow - pre_overflow) * 65535;
-		if((abs)(enc_cnt - first_cnt) > end){
+		enc_cnt = TIM2 -> CNT;
+		enc_cnt = enc_cnt + (overflow - pre_overflow) * 65535;
+		if((abs)(enc_cnt - first_cnt) >= end_cnt){
 			stopAll();
 			break;
 		}
-		now_speed = abs(enc_cnt - pre_cnt);
-		speeds.buf[speeds.now_point++] = now_speed;
+		now_speed = (abs)(enc_cnt - pre_cnt);
+		speeds.buf[(speeds.now_point)++] = now_speed;
 		if(speeds.now_point >= speeds.buf_num){
 			speeds.now_point = 0;
 		}
@@ -437,7 +444,7 @@ void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 		if(power > 999){
 			power = 999;
 		}
-		if(power < 50 || (enc_cnt == first_cnt) || (rpm != 0)){
+		if((power < 50) || (enc_cnt == first_cnt)){
 			power = 50;
 		}
 		simplePWM(phase_, power);
@@ -447,13 +454,28 @@ void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 
 
 	}
-	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, RESET);
 	free(speeds.buf);
 }
 
+void limitSwitch(bool phase_, uint16_t power_, uint8_t port_){
+	sw_flag1 = 0;
+	sw_flag2 = 0;
+	while(nvic_flag){
+		if((sw_flag1 == 1)&&(port_ == 0)){
+			stopAll();
+			break;
+		}
+		if((sw_flag2 == 1)&&(port_ == 1)){
+			stopAll();
+			break;
+		}
+		simplePWM(phase_, power_);
+		HAL_Delay(100);
+	}
+}
 void stopAll(void){
 	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
-	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, RESET);
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, SET);
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_){
@@ -464,6 +486,15 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_){
 		}else{
 			overflow++;
 		}
+	}
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
+	if(GPIO_Pin == GPIO_PIN_0){
+		sw_flag1 = 1;
+	}
+	if(GPIO_Pin == GPIO_PIN_1){
+		sw_flag2 = 1;
 	}
 }
 
@@ -489,6 +520,8 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 				case ANGLE:
 					break;
 				case LIM_SW:
+					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, SET);
+					limitSwitch((bool)rx_data[1], ((uint16_t)(rx_data[2]<<8 | rx_data[3])), (uint8_t)(rx_data[4]));
 					break;
 				default:
 					stopAll();
