@@ -209,10 +209,10 @@ static void MX_CAN_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN CAN_Init 2 */
-  id_sw += (uint32_t)(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0)) << 3;
-  id_sw += (uint32_t)(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_1)) << 2;
-  id_sw += (uint32_t)(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_2)) << 1;
-  id_sw += (uint32_t)(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_3));
+  id_sw += (uint32_t)(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_3)) << 3;
+  id_sw += (uint32_t)(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_2)) << 2;
+  id_sw += (uint32_t)(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_1)) << 1;
+  id_sw += (uint32_t)(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0));
 
   id_own = id_sw << 21;
   filter.FilterIdHigh         = id_all >> 16;
