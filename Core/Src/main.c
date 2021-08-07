@@ -31,7 +31,7 @@
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 typedef enum Mode{
-	PWM, SPEED, ANGLE, LIM_SW
+	PWM, SPEED, LIM_SW
 }Mode;
 
 typedef struct RingBuf{
@@ -536,8 +536,6 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 				case SPEED:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, SET);
 					encoderSpeed((bool)rx_data[1], ((uint16_t)(rx_data[2]<<8 | rx_data[3])), ((uint16_t)(rx_data[5]<<8 | rx_data[6])));
-					break;
-				case ANGLE:
 					break;
 				case LIM_SW:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, SET);
