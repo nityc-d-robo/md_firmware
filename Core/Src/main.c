@@ -44,6 +44,7 @@ typedef struct RingBuf{
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define SPR 48
+#define SPEED_P 50;
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -395,15 +396,15 @@ void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 	float rpm = (float)(rpm_/128.0f);
 	float end = (float)(end_/128.0f);
 	int pre_overflow = 0;
-	uint16_t power = 0;
-	uint16_t pre_power = 0;
+	uint16_t power = 0u;
+	uint16_t pre_power = 0u;
 	float target_speed = (rpm*SPR*4)/600;
-	uint32_t now_speed = 0;
-	uint32_t average_speed = 0;
-	uint16_t enc_cnt = 0;
-	uint16_t pre_cnt = 0;
-	uint16_t first_cnt = 0;
-	uint32_t P = 0u;
+	uint32_t now_speed = 0u;
+	uint32_t average_speed = 0u;
+	uint16_t enc_cnt = 0u;
+	uint16_t pre_cnt = 0u;
+	uint16_t first_cnt = 0u;
+	uint32_t propotion = 0u;
 	uint32_t end_cnt = (uint32_t)(end * 192);
 
 
@@ -432,8 +433,8 @@ void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 			speeds.now_point = 0;
 		}
 		average_speed = (speeds.buf[0] + speeds.buf[1] + speeds.buf[2] + speeds.buf[3]) / 4;
-		P = ((target_speed - average_speed) / target_speed) * 50;
-		power = (uint16_t)(pre_power + P);
+		propotion = ((target_speed - average_speed) / target_speed) * SPEED_P;
+		power = (uint16_t)(pre_power + propotion);
 		if(power > 999){
 			power = 999;
 		}
@@ -476,6 +477,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 			nvic_flag = true;
 			switch(rx_data[0]){
 				case PWM:
+					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, SET);
 					simplePWM((bool)rx_data[1], ((uint16_t)(rx_data[2])<<8 | rx_data[3]));
 					break;
 				case SPEED:
