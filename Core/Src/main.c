@@ -481,6 +481,8 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 					simplePWM((bool)rx_data[1], ((uint16_t)(rx_data[2])<<8 | rx_data[3]));
 					break;
 				case SPEED:
+					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, SET);
+					encoderSpeed((bool)rx_data[1], ((uint16_t)(rx_data[2]<<8 | rx_data[3])), ((uint16_t)(rx_data[5]<<8 | rx_data[6])));
 					break;
 				case ANGLE:
 					break;
