@@ -1,6 +1,6 @@
 /* USER CODE BEGIN Header */
-//Ver 1.0.0 2021/07/21 first_kato
-//new create
+//Ver 1.0.0 2021/08/07 k-trash
+//testing encoderSpeed
 /**
   ******************************************************************************
   * @file           : main.c
