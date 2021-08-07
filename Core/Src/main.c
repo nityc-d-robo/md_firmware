@@ -407,7 +407,6 @@ void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 	uint32_t propotion = 0u;
 	uint32_t end_cnt = (uint32_t)(end * 192);
 
-
 	RingBuf speeds;
 
 	speeds.buf_num = 4u;
