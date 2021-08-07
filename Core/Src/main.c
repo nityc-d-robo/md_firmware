@@ -43,7 +43,7 @@ typedef struct RingBuf{
 typedef struct Encoder{
 	uint16_t cnt;
 	int16_t overflow;
-	uint64_t fusion_cnt;
+	uint64_t fusion_cnt;		//cnt + overflow * 65535
 }Encoder;
 /* USER CODE END PTD */
 
@@ -466,6 +466,7 @@ void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 		if((power < 50) || (now.fusion_cnt == first.cnt)){
 			power = 50;
 		}
+
 		simplePWM(phase_, power);
 		pre.cnt = now.cnt;
 		pre.overflow = now.overflow;
