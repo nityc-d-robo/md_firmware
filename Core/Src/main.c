@@ -444,7 +444,10 @@ void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 		HAL_Delay(100);
 		pre_cnt = enc_cnt;
 		pre_power = power;
+
+
 	}
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, RESET);
 	free(speeds.buf);
 }
 
