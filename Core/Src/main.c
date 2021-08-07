@@ -39,6 +39,12 @@ typedef struct RingBuf{
 	uint8_t buf_num;			//amount of ring buffer
 	uint16_t *buf;
 }RingBuf;
+
+typedef struct Encoder{
+	uint16_t cnt;
+	int16_t overflow;
+	uint64_t fusion_cnt;
+}Encoder;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -399,7 +405,8 @@ void simplePWM(bool phase_, uint16_t power_){
 }
 
 void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
-	int pre_overflow = 0;
+	int32_t pre_overflow = 0;
+	int32_t first_overflow = 0;
 	uint16_t power = 0u;
 	uint16_t pre_power = 0u;
 	float target_speed = (float)((rpm_*SPR*4)/600);
@@ -409,11 +416,9 @@ void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 	uint16_t pre_cnt = 0u;
 	uint16_t first_cnt = 0u;
 	uint32_t propotion = 0u;
-	uint32_t end_cnt = (uint32_t)(end_*SPR*4);
+	uint32_t end_cnt = (uint32_t)((end_*SPR*4)/360);
 
 	RingBuf speeds;
-
-	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, RESET);
 
 	speeds.buf_num = 4u;
 	speeds.now_point = 0u;
@@ -423,13 +428,14 @@ void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 	}
 
 	first_cnt = TIM2 -> CNT;
+	first_overflow = overflow;
 	pre_cnt = first_cnt;
-	pre_overflow = overflow;
+	pre_overflow = first_overflow;
 	HAL_Delay(100);
 	while(nvic_flag){
 		enc_cnt = TIM2 -> CNT;
 		enc_cnt = enc_cnt + (overflow - pre_overflow) * 65535;
-		if((abs)(enc_cnt - first_cnt) >= end_cnt){
+		if((abs)(enc_cnt - first_cnt) >= end_cnt){				//将来的にPD制御に
 			stopAll();
 			break;
 		}
@@ -475,7 +481,7 @@ void limitSwitch(bool phase_, uint16_t power_, uint8_t port_){
 }
 void stopAll(void){
 	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
-	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, SET);
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, RESET);
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_){
