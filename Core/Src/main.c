@@ -80,17 +80,16 @@ void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_);
 void limitSwitch(bool phase_, uint16_t power_, uint8_t port_);
 void stopAll(void);
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_);
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
+void HAL_GPIO_EXTI_Callback(uint16_t gpio_pin_);
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 bool nvic_flag = false;					//flag for execution permission
-int overflow = 0;
-int sw_flag1 = 0;
-int sw_flag2 = 0;
-unsigned long int encoder_cnt = 0u;
+int32_t overflow = 0;
+bool sw_flag1 = 0;
+bool sw_flag2 = 0;
 /* USER CODE END 0 */
 
 /**
@@ -134,8 +133,8 @@ int main(void)
   __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, SET);
   overflow = 0;
-  sw_flag1 = 0;
-  sw_flag2 = 0;
+  sw_flag1 = false;
+  sw_flag2 = false;
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -481,11 +480,11 @@ void limitSwitch(bool phase_, uint16_t power_, uint8_t port_){
 	sw_flag1 = 0;
 	sw_flag2 = 0;
 	while(nvic_flag){
-		if((sw_flag1 == 1)&&(port_ == 0)){
+		if(sw_flag1 && (port_ == 0)){
 			stopAll();
 			break;
 		}
-		if((sw_flag2 == 1)&&(port_ == 1)){
+		if(sw_flag2 && (port_ == 1)){
 			stopAll();
 			break;
 		}
@@ -493,6 +492,7 @@ void limitSwitch(bool phase_, uint16_t power_, uint8_t port_){
 		HAL_Delay(100);
 	}
 }
+
 void stopAll(void){
 	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
 	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, RESET);
@@ -509,12 +509,12 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_){
 	}
 }
 
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
-	if(GPIO_Pin == GPIO_PIN_0){
-		sw_flag1 = 1;
+void HAL_GPIO_EXTI_Callback(uint16_t gpio_pin_){
+	if(gpio_pin_ == GPIO_PIN_0){
+		sw_flag1 = true;
 	}
-	if(GPIO_Pin == GPIO_PIN_1){
-		sw_flag2 = 1;
+	if(gpio_pin_ == GPIO_PIN_1){
+		sw_flag2 = true;
 	}
 }
 
