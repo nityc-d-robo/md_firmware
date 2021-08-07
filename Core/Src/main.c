@@ -24,7 +24,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdbool.h>
+#include <stdlib.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -42,6 +43,7 @@ typedef struct RingBuf{
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define SPR 48
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -112,13 +114,22 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
+  HAL_TIM_Encoder_Start(&htim2,TIM_CHANNEL_ALL);
+  HAL_TIM_Base_Start_IT(&htim2);
+  HAL_CAN_Start(&hcan);
+  HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO0_MSG_PENDING);
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 
+  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, SET);
+  overflow = 0;
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  HAL_Delay(500);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -386,12 +397,13 @@ void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 	int pre_overflow = 0;
 	uint16_t power = 0;
 	uint16_t pre_power = 0;
-	float target_speed = (rpm*192)/600;
+	float target_speed = (rpm*SPR*4)/600;
 	uint32_t now_speed = 0;
 	uint32_t average_speed = 0;
 	uint16_t enc_cnt = 0;
 	uint16_t pre_cnt = 0;
 	uint16_t first_cnt = 0;
+	uint32_t P = 0u;
 	uint32_t end_cnt = (uint32_t)(end * 192);
 
 
