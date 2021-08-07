@@ -405,20 +405,31 @@ void simplePWM(bool phase_, uint16_t power_){
 }
 
 void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
-	int32_t pre_overflow = 0;
-	int32_t first_overflow = 0;
 	uint16_t power = 0u;
 	uint16_t pre_power = 0u;
 	float target_speed = (float)((rpm_*SPR*4)/600);
 	uint32_t now_speed = 0u;
 	uint32_t average_speed = 0u;
-	uint16_t enc_cnt = 0u;
-	uint16_t pre_cnt = 0u;
-	uint16_t first_cnt = 0u;
 	uint32_t propotion = 0u;
 	uint32_t end_cnt = (uint32_t)((end_*SPR*4)/360);
 
+	Encoder first;		//初期状態
+	Encoder pre;			//前ループ時
+	Encoder now;			//現在
+
 	RingBuf speeds;
+
+	first.overflow = 0;
+	first.cnt = 0u;
+	first.fusion_cnt = 0;
+
+	pre.overflow = 0;
+	pre.cnt = 0u;
+	pre.fusion_cnt = 0;
+
+	now.overflow = 0;
+	now.cnt = 0u;
+	now.fusion_cnt = 0;
 
 	speeds.buf_num = 4u;
 	speeds.now_point = 0u;
@@ -427,38 +438,40 @@ void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 		stopAll();
 	}
 
-	first_cnt = TIM2 -> CNT;
-	first_overflow = overflow;
-	pre_cnt = first_cnt;
-	pre_overflow = first_overflow;
+	first.cnt = pre.cnt = TIM2 -> CNT;
+	first.overflow = pre.overflow = overflow;
 	HAL_Delay(100);
-	while(nvic_flag){
-		enc_cnt = TIM2 -> CNT;
-		enc_cnt = enc_cnt + (overflow - pre_overflow) * 65535;
-		if((abs)(enc_cnt - first_cnt) >= end_cnt){				//将来的にPD制御に
+	while(nvic_flag && (rpm_ != 0)){
+		now.cnt = TIM2 -> CNT;
+		now.overflow = overflow - first.overflow;
+		now.fusion_cnt = now.cnt + now.overflow * 65535;
+
+		if((abs)(now.fusion_cnt - first.cnt) >= end_cnt){				//将来的にPD制御に
 			stopAll();
 			break;
 		}
-		now_speed = (abs)(enc_cnt - pre_cnt);
+
+		now_speed = (abs)(now.fusion_cnt - pre.fusion_cnt);
 		speeds.buf[(speeds.now_point)++] = now_speed;
 		if(speeds.now_point >= speeds.buf_num){
 			speeds.now_point = 0;
 		}
 		average_speed = (speeds.buf[0] + speeds.buf[1] + speeds.buf[2] + speeds.buf[3]) / 4;
+
 		propotion = ((target_speed - average_speed) / target_speed) * SPEED_P;
 		power = (uint16_t)(pre_power + propotion);
 		if(power > 999){
 			power = 999;
 		}
-		if((power < 50) || (enc_cnt == first_cnt)){
+		if((power < 50) || (now.fusion_cnt == first.cnt)){
 			power = 50;
 		}
 		simplePWM(phase_, power);
-		HAL_Delay(100);
-		pre_cnt = enc_cnt;
+		pre.cnt = now.cnt;
+		pre.overflow = now.overflow;
 		pre_power = power;
 
-
+		HAL_Delay(100);
 	}
 	free(speeds.buf);
 }
