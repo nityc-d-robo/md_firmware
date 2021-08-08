@@ -86,10 +86,10 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-bool nvic_flag = false;					//flag for execution permission
-int32_t overflow = 0;
-bool sw_flag1 = 0;
-bool sw_flag2 = 0;
+volatile bool nvic_flag = false;					//flag for execution permission
+volatile int32_t overflow = 0;
+volatile bool sw_flag1 = 0;
+volatile bool sw_flag2 = 0;
 /* USER CODE END 0 */
 
 /**
