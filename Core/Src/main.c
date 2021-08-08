@@ -66,7 +66,7 @@ typedef struct EncoderSpeed{
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define SPR 48
-#define SPEED_P 50
+#define SPEED_P 100
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
