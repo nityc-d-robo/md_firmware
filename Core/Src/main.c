@@ -34,17 +34,33 @@ typedef enum Mode{
 	PWM, SPEED, LIM_SW
 }Mode;
 
+typedef struct Encoder{
+	uint16_t cnt;
+	int16_t overflow;
+	uint64_t fusion_cnt;		//cnt + overflow * 65535
+}Encoder;
+
 typedef struct RingBuf{
 	uint8_t now_point;		//now point of ring buffer
 	uint8_t buf_num;			//amount of ring buffer
 	uint16_t *buf;
 }RingBuf;
 
-typedef struct Encoder{
-	uint16_t cnt;
-	int16_t overflow;
-	uint64_t fusion_cnt;		//cnt + overflow * 65535
-}Encoder;
+typedef struct EncoderSpeed{
+	bool phase;
+	uint16_t rpm, end;
+	int32_t power;
+	uint16_t pre_power;
+	float target_speed;
+	uint32_t now_speed;
+	uint32_t average_speed;
+	int32_t propotion;
+	uint32_t end_cnt;
+	RingBuf speeds;
+	Encoder first;		//初期状態
+	Encoder pre;			//前ループ時
+	Encoder now;			//現在
+}EncoderSpeed;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -77,10 +93,11 @@ static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM16_Init(void);
 /* USER CODE BEGIN PFP */
-void simplePWM(bool phase_, uint16_t power_);
-void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_);
-void limitSwitch(bool phase_, uint16_t power_, uint8_t port_);
+bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_);
+bool rotateSpeed(void);
+void finishSpeed(void);
 void stopAll(void);
+void simplePWM(bool phase_, uint16_t power_);
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_);
 void HAL_GPIO_EXTI_Callback(uint16_t gpio_pin_);
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_);
@@ -88,10 +105,12 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-volatile bool nvic_flag = false;					//flag for execution permission
+EncoderSpeed encoder_speed;
+
 volatile int32_t overflow = 0;
-volatile bool sw_flag1 = 0;
-volatile bool sw_flag2 = 0;
+volatile bool speed_flag = false;
+volatile bool sw_flag1 = false;
+volatile bool sw_flag2 = false;
 /* USER CODE END 0 */
 
 /**
@@ -433,89 +452,107 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
+	if(rpm_ == 0){
+		return false;
+	}
+
+	encoder_speed.speeds.buf_num = 4u;
+	encoder_speed.speeds.now_point = 0u;
+	encoder_speed.speeds.buf = calloc(encoder_speed.speeds.buf_num, sizeof(uint16_t));
+	if(encoder_speed.speeds.buf == NULL){
+		stopAll();
+		return false;
+	}
+
+	encoder_speed.phase = phase_;
+	encoder_speed.rpm = rpm_;
+	encoder_speed.end = end_;
+
+	encoder_speed.first.overflow = 0;
+	encoder_speed.first.cnt = 0u;
+	encoder_speed.first.fusion_cnt = 0;
+
+	encoder_speed.pre.overflow = 0;
+	encoder_speed.pre.cnt = 0u;
+	encoder_speed.pre.fusion_cnt = 0;
+
+	encoder_speed.now.overflow = 0;
+	encoder_speed.now.cnt = 0u;
+	encoder_speed.now.fusion_cnt = 0;
+
+	encoder_speed.first.cnt = encoder_speed.pre.cnt = TIM2 -> CNT;
+	encoder_speed.first.overflow = encoder_speed.pre.overflow = overflow;
+
+	encoder_speed.power = 0u;
+	encoder_speed.pre_power = 0u;
+	encoder_speed.target_speed = (float)((rpm_*SPR*4)/600);
+	encoder_speed.now_speed = 0u;
+	encoder_speed.average_speed = 0u;
+	encoder_speed.propotion = 0u;
+	encoder_speed.end_cnt = (uint32_t)((end_*SPR*4)/360);
+
+	__HAL_TIM_CLEAR_FLAG(&htim16, TIM_FLAG_UPDATE);
+	HAL_TIM_Base_Start_IT(&htim16);
+
+	speed_flag = true;
+
+	return true;
+}
+
+bool rotateSpeed(void){
+	encoder_speed.now.cnt = TIM2 -> CNT;
+	encoder_speed.now.overflow = overflow - encoder_speed.first.overflow;
+	encoder_speed.now.fusion_cnt = encoder_speed.now.cnt + encoder_speed.now.overflow * 65535;
+
+	if(abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.first.cnt)) >= encoder_speed.end_cnt){				//将来的にPD制御に
+		stopAll();
+		finishSpeed();
+		return false;
+	}
+
+	encoder_speed.now_speed = abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.pre.fusion_cnt));
+	encoder_speed.speeds.buf[(encoder_speed.speeds.now_point)++] = encoder_speed.now_speed;
+	if(encoder_speed.speeds.now_point >= encoder_speed.speeds.buf_num){
+		encoder_speed.speeds.now_point = 0;
+	}
+	encoder_speed.average_speed = (encoder_speed.speeds.buf[0] + encoder_speed.speeds.buf[1] + encoder_speed.speeds.buf[2] + encoder_speed.speeds.buf[3]) / 4;
+
+	encoder_speed.propotion = ((encoder_speed.target_speed - encoder_speed.average_speed) / encoder_speed.target_speed) * SPEED_P;
+	encoder_speed.power = (int32_t)(encoder_speed.pre_power + encoder_speed.propotion);
+	if(encoder_speed.power > 999){
+		encoder_speed.power = 999;
+	}
+	if((encoder_speed.power < 300) || (encoder_speed.now.fusion_cnt == encoder_speed.first.cnt)){
+		encoder_speed.power = 300;
+	}
+
+	simplePWM(encoder_speed.phase, encoder_speed.power);
+	encoder_speed.pre.cnt = encoder_speed.now.cnt;
+	encoder_speed.pre.overflow = encoder_speed.now.overflow;
+	encoder_speed.pre.fusion_cnt = encoder_speed.now.fusion_cnt;
+	encoder_speed.pre_power = encoder_speed.power;
+
+	return true;
+}
+
+void finishSpeed(void){
+	HAL_TIM_Base_Stop_IT(&htim16);
+	free(encoder_speed.speeds.buf);
+	speed_flag = false;
+}
+
+void stopAll(void){
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
+}
+
 void simplePWM(bool phase_, uint16_t power_){
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, (GPIO_PinState)phase_);
 	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, power_);
 }
 
-void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
-	int32_t power = 0u;
-	uint16_t pre_power = 0u;
-	float target_speed = (float)((rpm_*SPR*4)/600);
-	uint32_t now_speed = 0u;
-	uint32_t average_speed = 0u;
-	int32_t propotion = 0u;
-	uint32_t end_cnt = (uint32_t)((end_*SPR*4)/360);
-
-	Encoder first;		//初期状態
-	Encoder pre;			//前ループ時
-	Encoder now;			//現在
-
-	RingBuf speeds;
-
-	first.overflow = 0;
-	first.cnt = 0u;
-	first.fusion_cnt = 0;
-
-	pre.overflow = 0;
-	pre.cnt = 0u;
-	pre.fusion_cnt = 0;
-
-	now.overflow = 0;
-	now.cnt = 0u;
-	now.fusion_cnt = 0;
-
-	speeds.buf_num = 4u;
-	speeds.now_point = 0u;
-	speeds.buf = calloc(speeds.buf_num, sizeof(uint16_t));
-	if(speeds.buf == NULL){
-		stopAll();
-	}
-
-	first.cnt = pre.cnt = TIM2 -> CNT;
-	first.overflow = pre.overflow = overflow;
-	HAL_Delay(100);
-	while(nvic_flag  && (rpm_ != 0)){
-		now.cnt = TIM2 -> CNT;
-		now.overflow = overflow - first.overflow;
-		now.fusion_cnt = now.cnt + now.overflow * 65535;
-
-		if(abs((int32_t)(now.fusion_cnt - first.cnt)) >= end_cnt){				//将来的にPD制御に
-			stopAll();
-			break;
-		}
-
-		now_speed = abs((int32_t)(now.fusion_cnt - pre.fusion_cnt));
-		speeds.buf[(speeds.now_point)++] = now_speed;
-		if(speeds.now_point >= speeds.buf_num){
-			speeds.now_point = 0;
-		}
-		average_speed = (speeds.buf[0] + speeds.buf[1] + speeds.buf[2] + speeds.buf[3]) / 4;
-
-		propotion = ((target_speed - average_speed) / target_speed) * SPEED_P;
-		power = (int32_t)(pre_power + propotion);
-		if(power > 999){
-			power = 999;
-		}
-		if((power < 300) || (now.fusion_cnt == first.cnt)){
-			power = 300;
-		}
-
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, (GPIO_PinState)phase_);
-		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, (uint32_t)power);
-
-		//simplePWM(phase_, power);
-		pre.cnt = now.cnt;
-		pre.overflow = now.overflow;
-		pre.fusion_cnt = now.fusion_cnt;
-		pre_power = power;
-
-		HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-		HAL_Delay(100);
-	}
-	free(speeds.buf);
-}
-
+/*
 void limitSwitch(bool phase_, uint16_t power_, uint8_t port_){
 	sw_flag1 = 0;
 	sw_flag2 = 0;
@@ -529,14 +566,9 @@ void limitSwitch(bool phase_, uint16_t power_, uint8_t port_){
 			break;
 		}
 		simplePWM(phase_, power_);
-		HAL_Delay(100);
+		//HAL_Delay(100);
 	}
-}
-
-void stopAll(void){
-	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
-	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
-}
+}*/
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_){
 	if(htim_->Instance == TIM2){
@@ -546,6 +578,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_){
 		}else{
 			overflow++;
 		}
+	}else if(htim_->Instance == TIM16){
+		__HAL_TIM_CLEAR_FLAG(&htim16, TIM_IT_UPDATE);
+		rotateSpeed();
 	}
 }
 
@@ -564,10 +599,12 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 	uint8_t rx_data[8] = { 0u };
 	if (HAL_CAN_GetRxMessage(hcan_, CAN_RX_FIFO0, &RxHeader, rx_data) == HAL_OK){
 		receive_id = (RxHeader.IDE == CAN_ID_STD)? RxHeader.StdId : RxHeader.ExtId;
+		if(speed_flag){
+			finishSpeed();
+		}
 		if(receive_id == 0x100){
 			stopAll();
 		}else{
-			nvic_flag = true;
 			switch(rx_data[0]){
 				case PWM:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
@@ -575,11 +612,11 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 					break;
 				case SPEED:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-					encoderSpeed((bool)rx_data[1], ((uint16_t)(rx_data[2]<<8 | rx_data[3])), ((uint16_t)(rx_data[4]<<8 | rx_data[5])));
+					initSpeed((bool)rx_data[1], ((uint16_t)(rx_data[2]<<8 | rx_data[3])), ((uint16_t)(rx_data[4]<<8 | rx_data[5])));
 					break;
 				case LIM_SW:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-					limitSwitch((bool)rx_data[1], ((uint16_t)(rx_data[2]<<8 | rx_data[3])), (uint8_t)(rx_data[4]));
+					//limitSwitch((bool)rx_data[1], ((uint16_t)(rx_data[2]<<8 | rx_data[3])), (uint8_t)(rx_data[4]));
 					break;
 				default:
 					stopAll();
@@ -587,7 +624,6 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 			}
 		}
 	}
-	nvic_flag = false;
 }
 /* USER CODE END 4 */
 
