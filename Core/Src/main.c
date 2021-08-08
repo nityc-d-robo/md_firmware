@@ -1,5 +1,5 @@
 /* USER CODE BEGIN Header */
-//Ver 1.0.0 2021/08/07 k-trash
+//Ver 1.0.0 2021/08/08 k-trash
 //testing encoderSpeed
 /**
   ******************************************************************************
@@ -141,7 +141,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  HAL_Delay(500);
+	  //HAL_Delay(500);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -404,12 +404,12 @@ void simplePWM(bool phase_, uint16_t power_){
 }
 
 void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
-	uint16_t power = 0u;
+	int32_t power = 0u;
 	uint16_t pre_power = 0u;
 	float target_speed = (float)((rpm_*SPR*4)/600);
 	uint32_t now_speed = 0u;
 	uint32_t average_speed = 0u;
-	uint32_t propotion = 0u;
+	int32_t propotion = 0u;
 	uint32_t end_cnt = (uint32_t)((end_*SPR*4)/360);
 
 	Encoder first;		//初期状態
@@ -440,7 +440,7 @@ void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 	first.cnt = pre.cnt = TIM2 -> CNT;
 	first.overflow = pre.overflow = overflow;
 	HAL_Delay(100);
-	while(nvic_flag && (rpm_ != 0)){
+	while(nvic_flag  && (rpm_ != 0)){
 		now.cnt = TIM2 -> CNT;
 		now.overflow = overflow - first.overflow;
 		now.fusion_cnt = now.cnt + now.overflow * 65535;
@@ -458,19 +458,24 @@ void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 		average_speed = (speeds.buf[0] + speeds.buf[1] + speeds.buf[2] + speeds.buf[3]) / 4;
 
 		propotion = ((target_speed - average_speed) / target_speed) * SPEED_P;
-		power = (uint16_t)(pre_power + propotion);
+		power = (int32_t)(pre_power + propotion);
 		if(power > 999){
 			power = 999;
 		}
-		if((power < 50) || (now.fusion_cnt == first.cnt)){
-			power = 50;
+		if((power < 300) || (now.fusion_cnt == first.cnt)){
+			power = 300;
 		}
 
-		simplePWM(phase_, power);
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, phase_);
+		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, (uint32_t)power);
+
+		//simplePWM(phase_, power);
 		pre.cnt = now.cnt;
 		pre.overflow = now.overflow;
+		pre.fusion_cnt = now.fusion_cnt;
 		pre_power = power;
 
+		HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
 		HAL_Delay(100);
 	}
 	free(speeds.buf);
@@ -535,7 +540,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 					break;
 				case SPEED:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, SET);
-					encoderSpeed((bool)rx_data[1], ((uint16_t)(rx_data[2]<<8 | rx_data[3])), ((uint16_t)(rx_data[5]<<8 | rx_data[6])));
+					encoderSpeed((bool)rx_data[1], ((uint16_t)(rx_data[2]<<8 | rx_data[3])), ((uint16_t)(rx_data[4]<<8 | rx_data[5])));
 					break;
 				case LIM_SW:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, SET);
