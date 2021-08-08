@@ -49,8 +49,9 @@ typedef struct RingBuf{
 typedef struct EncoderSpeed{
 	bool phase;
 	uint16_t rpm, end;
-	int32_t power;
 	uint16_t pre_power;
+	int32_t power;
+	int32_t end_power;
 	float target_speed;
 	uint32_t now_speed;
 	uint32_t average_speed;
@@ -67,6 +68,7 @@ typedef struct EncoderSpeed{
 /* USER CODE BEGIN PD */
 #define SPR 48
 #define SPEED_P 100
+#define END_P 20
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -163,7 +165,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  //HAL_Delay(500);
+	  HAL_Delay(500);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -505,8 +507,7 @@ bool rotateSpeed(void){
 	encoder_speed.now.overflow = overflow - encoder_speed.first.overflow;
 	encoder_speed.now.fusion_cnt = encoder_speed.now.cnt + encoder_speed.now.overflow * 65535;
 
-	if(abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.first.cnt)) >= encoder_speed.end_cnt){				//将来的にPD制御に
-		stopAll();
+	if(abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.first.cnt)) >= encoder_speed.end_cnt-5){				//将来的にPD制御に
 		finishSpeed();
 		return false;
 	}
@@ -520,6 +521,13 @@ bool rotateSpeed(void){
 
 	encoder_speed.propotion = ((encoder_speed.target_speed - encoder_speed.average_speed) / encoder_speed.target_speed) * SPEED_P;
 	encoder_speed.power = (int32_t)(encoder_speed.pre_power + encoder_speed.propotion);
+
+	encoder_speed.end_power = END_P * (encoder_speed.end_cnt - abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.first.cnt)));
+
+	if(encoder_speed.power > encoder_speed.end_power){
+		encoder_speed.power = encoder_speed.end_power;
+	}
+
 	if(encoder_speed.power > 999){
 		encoder_speed.power = 999;
 	}
@@ -537,6 +545,7 @@ bool rotateSpeed(void){
 }
 
 void finishSpeed(void){
+	simplePWM(encoder_speed.phase, 0);
 	HAL_TIM_Base_Stop_IT(&htim16);
 	free(encoder_speed.speeds.buf);
 	speed_flag = false;
