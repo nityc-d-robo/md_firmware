@@ -63,6 +63,7 @@ CAN_HandleTypeDef hcan;
 
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
+TIM_HandleTypeDef htim16;
 
 /* USER CODE BEGIN PV */
 
@@ -74,6 +75,7 @@ static void MX_GPIO_Init(void);
 static void MX_CAN_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
+static void MX_TIM16_Init(void);
 /* USER CODE BEGIN PFP */
 void simplePWM(bool phase_, uint16_t power_);
 void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_);
@@ -123,6 +125,7 @@ int main(void)
   MX_CAN_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();
+  MX_TIM16_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_Encoder_Start(&htim2,TIM_CHANNEL_ALL);
   HAL_TIM_Base_Start_IT(&htim2);
@@ -131,7 +134,7 @@ int main(void)
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 
   __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, SET);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
   overflow = 0;
   sw_flag1 = false;
   sw_flag2 = false;
@@ -342,6 +345,38 @@ static void MX_TIM3_Init(void)
 }
 
 /**
+  * @brief TIM16 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM16_Init(void)
+{
+
+  /* USER CODE BEGIN TIM16_Init 0 */
+
+  /* USER CODE END TIM16_Init 0 */
+
+  /* USER CODE BEGIN TIM16_Init 1 */
+
+  /* USER CODE END TIM16_Init 1 */
+  htim16.Instance = TIM16;
+  htim16.Init.Prescaler = 479;
+  htim16.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim16.Init.Period = 9999;
+  htim16.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim16.Init.RepetitionCounter = 0;
+  htim16.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim16) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM16_Init 2 */
+
+  /* USER CODE END TIM16_Init 2 */
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -399,7 +434,7 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 void simplePWM(bool phase_, uint16_t power_){
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, phase_);
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, (GPIO_PinState)phase_);
 	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, power_);
 }
 
@@ -445,12 +480,12 @@ void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 		now.overflow = overflow - first.overflow;
 		now.fusion_cnt = now.cnt + now.overflow * 65535;
 
-		if((abs)(now.fusion_cnt - first.cnt) >= end_cnt){				//将来的にPD制御に
+		if(abs((int32_t)(now.fusion_cnt - first.cnt)) >= end_cnt){				//将来的にPD制御に
 			stopAll();
 			break;
 		}
 
-		now_speed = (abs)(now.fusion_cnt - pre.fusion_cnt);
+		now_speed = abs((int32_t)(now.fusion_cnt - pre.fusion_cnt));
 		speeds.buf[(speeds.now_point)++] = now_speed;
 		if(speeds.now_point >= speeds.buf_num){
 			speeds.now_point = 0;
@@ -466,7 +501,7 @@ void encoderSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 			power = 300;
 		}
 
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, phase_);
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, (GPIO_PinState)phase_);
 		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, (uint32_t)power);
 
 		//simplePWM(phase_, power);
@@ -500,7 +535,7 @@ void limitSwitch(bool phase_, uint16_t power_, uint8_t port_){
 
 void stopAll(void){
 	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
-	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, RESET);
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_){
@@ -535,15 +570,15 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 			nvic_flag = true;
 			switch(rx_data[0]){
 				case PWM:
-					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, SET);
+					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
 					simplePWM((bool)rx_data[1], ((uint16_t)(rx_data[2])<<8 | rx_data[3]));
 					break;
 				case SPEED:
-					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, SET);
+					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
 					encoderSpeed((bool)rx_data[1], ((uint16_t)(rx_data[2]<<8 | rx_data[3])), ((uint16_t)(rx_data[4]<<8 | rx_data[5])));
 					break;
 				case LIM_SW:
-					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, SET);
+					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
 					limitSwitch((bool)rx_data[1], ((uint16_t)(rx_data[2]<<8 | rx_data[3])), (uint8_t)(rx_data[4]));
 					break;
 				default:
