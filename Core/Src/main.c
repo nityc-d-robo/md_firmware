@@ -383,7 +383,7 @@ static void MX_TIM16_Init(void)
   htim16.Instance = TIM16;
   htim16.Init.Prescaler = 479;
   htim16.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim16.Init.Period = 9999;
+  htim16.Init.Period = 999;
   htim16.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim16.Init.RepetitionCounter = 0;
   htim16.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -488,7 +488,7 @@ bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 
 	encoder_speed.power = 0u;
 	encoder_speed.pre_power = 0u;
-	encoder_speed.target_speed = (float)((rpm_*SPR*4)/600);
+	encoder_speed.target_speed = (float)((rpm_*SPR*4)/6000);
 	encoder_speed.now_speed = 0u;
 	encoder_speed.average_speed = 0u;
 	encoder_speed.propotion = 0u;
