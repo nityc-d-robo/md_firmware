@@ -62,6 +62,12 @@ typedef struct EncoderSpeed{
 	Encoder pre;			//前ループ時
 	Encoder now;			//現在
 }EncoderSpeed;
+
+typedef struct LimitSwitch{
+	bool port;
+	bool phase;
+	uint16_t power;
+}LimitSwitch;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -98,8 +104,13 @@ static void MX_TIM16_Init(void);
 bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_);
 bool rotateSpeed(void);
 void finishSpeed(void);
+
+void initLimit(bool phase_, uint16_t power_, bool port_);
+void finishLimit(void);
+
 void stopAll(void);
 void simplePWM(bool phase_, uint16_t power_);
+
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_);
 void HAL_GPIO_EXTI_Callback(uint16_t gpio_pin_);
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_);
@@ -107,12 +118,12 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-EncoderSpeed encoder_speed;
+volatile EncoderSpeed encoder_speed;
+volatile LimitSwitch limit_switch;
 
 volatile int32_t overflow = 0;
 volatile bool speed_flag = false;
-volatile bool sw_flag1 = false;
-volatile bool sw_flag2 = false;
+volatile bool limit_flag = false;
 /* USER CODE END 0 */
 
 /**
@@ -153,12 +164,12 @@ int main(void)
   HAL_CAN_Start(&hcan);
   HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO0_MSG_PENDING);
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+  HAL_NVIC_DisableIRQ(EXTI0_IRQn);
+  HAL_NVIC_DisableIRQ(EXTI1_IRQn);
 
   __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
   overflow = 0;
-  sw_flag1 = false;
-  sw_flag2 = false;
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -561,23 +572,33 @@ void simplePWM(bool phase_, uint16_t power_){
 	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, power_);
 }
 
-/*
-void limitSwitch(bool phase_, uint16_t power_, uint8_t port_){
-	sw_flag1 = 0;
-	sw_flag2 = 0;
-	while(nvic_flag){
-		if(sw_flag1 && (port_ == 0)){
-			stopAll();
-			break;
-		}
-		if(sw_flag2 && (port_ == 1)){
-			stopAll();
-			break;
-		}
-		simplePWM(phase_, power_);
-		//HAL_Delay(100);
+void initLimit(bool phase_, uint16_t power_, bool port_){
+	limit_switch.phase = phase_;
+	limit_switch.power = power_;
+	limit_switch.port = port_;
+
+	if(!port_){
+		HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+	}else{
+		HAL_NVIC_EnableIRQ(EXTI1_IRQn);
 	}
-}*/
+
+	limit_flag = true;
+
+	simplePWM(phase_, power_);
+}
+
+void finishLimit(void){
+	if(!limit_switch.port){
+		HAL_NVIC_DisableIRQ(EXTI0_IRQn);
+	}else{
+		HAL_NVIC_DisableIRQ(EXTI1_IRQn);
+	}
+
+	limit_flag = false;
+
+	simplePWM(limit_switch.phase, 0u);
+}
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_){
 	if(htim_->Instance == TIM2){
@@ -594,11 +615,11 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_){
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t gpio_pin_){
-	if(gpio_pin_ == GPIO_PIN_0){
-		sw_flag1 = true;
+	if(gpio_pin_ == GPIO_PIN_0 && !limit_switch.port){
+		finishLimit();
 	}
-	if(gpio_pin_ == GPIO_PIN_1){
-		sw_flag2 = true;
+	if(gpio_pin_ == GPIO_PIN_1 && limit_switch.port){
+		finishLimit();
 	}
 }
 
@@ -610,6 +631,8 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 		receive_id = (RxHeader.IDE == CAN_ID_STD)? RxHeader.StdId : RxHeader.ExtId;
 		if(speed_flag){
 			finishSpeed();
+		}else if(limit_flag){
+			finishLimit();
 		}
 		if(receive_id == 0x100){
 			stopAll();
@@ -625,7 +648,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 					break;
 				case LIM_SW:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-					//limitSwitch((bool)rx_data[1], ((uint16_t)(rx_data[2]<<8 | rx_data[3])), (uint8_t)(rx_data[4]));
+					initLimit((bool)rx_data[1], ((uint16_t)(rx_data[2]<<8 | rx_data[3])), (bool)(rx_data[4]));
 					break;
 				default:
 					stopAll();
