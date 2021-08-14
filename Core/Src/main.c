@@ -586,6 +586,8 @@ void initLimit(bool phase_, uint16_t power_, bool port_){
 	limit_flag = true;
 
 	simplePWM(phase_, power_);
+
+	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
 }
 
 void finishLimit(void){
