@@ -542,8 +542,8 @@ bool rotateSpeed(void){
 	if(encoder_speed.power > 999){
 		encoder_speed.power = 999;
 	}
-	if((encoder_speed.power < 300) || (encoder_speed.now.fusion_cnt == encoder_speed.first.cnt)){
-		encoder_speed.power = 300;
+	if((encoder_speed.power < 400) || (encoder_speed.now.fusion_cnt == encoder_speed.first.cnt)){
+		encoder_speed.power = 400;
 	}
 
 	simplePWM(encoder_speed.phase, encoder_speed.power);
