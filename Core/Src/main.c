@@ -75,6 +75,7 @@ typedef struct LimitSwitch{
 #define SPR 48
 #define SPEED_P 100
 #define END_P 20
+#define SPEED_RATE 200  //Hz
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -392,7 +393,7 @@ static void MX_TIM16_Init(void)
 
   /* USER CODE END TIM16_Init 1 */
   htim16.Instance = TIM16;
-  htim16.Init.Prescaler = 479;
+  htim16.Init.Prescaler = 239;
   htim16.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim16.Init.Period = 999;
   htim16.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -499,7 +500,7 @@ bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 
 	encoder_speed.power = 0u;
 	encoder_speed.pre_power = 0u;
-	encoder_speed.target_speed = (float)((rpm_*SPR*4)/6000);
+	encoder_speed.target_speed = (float)((rpm_*SPR*4)/(60*SPEED_RATE));
 	encoder_speed.now_speed = 0u;
 	encoder_speed.average_speed = 0u;
 	encoder_speed.propotion = 0u;
