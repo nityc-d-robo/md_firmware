@@ -629,7 +629,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t gpio_pin_){
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 	CAN_RxHeaderTypeDef RxHeader;
 	uint32_t receive_id = 0u;
-	uint8_t rx_data[8] = { 0u };
+	uint8_t rx_data[6] = { 0u };
 	if (HAL_CAN_GetRxMessage(hcan_, CAN_RX_FIFO0, &RxHeader, rx_data) == HAL_OK){
 		receive_id = (RxHeader.IDE == CAN_ID_STD)? RxHeader.StdId : RxHeader.ExtId;
 		if(speed_flag){
