@@ -1,6 +1,6 @@
 /* USER CODE BEGIN Header */
 //Ver 1.0.0 2021/08/08 k-trash
-//testing encoderSpeed
+//ver 1.0.0 complete
 /**
   ******************************************************************************
   * @file           : main.c
