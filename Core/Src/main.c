@@ -122,6 +122,8 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_);
 volatile EncoderSpeed encoder_speed;
 volatile LimitSwitch limit_switch;
 
+volatile int32_t abs_angle = 0;
+
 volatile int32_t overflow = 0;
 volatile bool speed_flag = false;
 volatile bool limit_flag = false;
