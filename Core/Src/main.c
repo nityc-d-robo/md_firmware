@@ -31,7 +31,7 @@
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 typedef enum Mode{
-	PWM, SPEED, LIM_SW
+	INIT, PWM, SPEED, ANGLE, LIM_SW
 }Mode;
 
 typedef struct Encoder{
@@ -102,6 +102,8 @@ static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM16_Init(void);
 /* USER CODE BEGIN PFP */
+void initDriver(uint16_t motor_max_rpm_, uint16_t gear_rate_, bool angle_reset_);
+
 bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_);
 bool rotateSpeed(void);
 void finishSpeed(void);
@@ -125,6 +127,9 @@ volatile LimitSwitch limit_switch;
 volatile int32_t overflow = 0;
 volatile bool speed_flag = false;
 volatile bool limit_flag = false;
+
+volatile uint16_t motor_max_rpm = 20400u;
+volatile uint16_t gear_rate = 1u;
 /* USER CODE END 0 */
 
 /**
@@ -694,4 +699,3 @@ void assert_failed(uint8_t *file, uint32_t line)
 }
 #endif /* USE_FULL_ASSERT */
 
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
