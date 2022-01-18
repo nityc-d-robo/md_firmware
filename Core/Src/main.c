@@ -31,7 +31,7 @@
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 typedef enum Mode{
-	INIT, PWM, SPEED, ANGLE, LIM_SW
+	INIT, PWM, SPEED, ANGLE, LIM_SW, STATUS
 }Mode;
 
 typedef struct Encoder{
@@ -471,6 +471,19 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void initDriver(uint16_t motor_max_rpm_, uint16_t gear_rate_, bool angle_reset_){
+	if(motor_max_rpm_ != 0u){
+		motor_max_rpm = motor_max_rpm;
+	}
+	if(gear_rate_ != 0u){
+		gear_rate = gear_rate_;
+	}
+	if(angle_reset_){
+		overflow = 0;
+		__HAL_TIM_SET_COUNTER(&htim3, 0u);
+	}
+}
+
 bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 	if(rpm_ == 0){
 		return false;
@@ -678,6 +691,8 @@ void Error_Handler(void)
   __disable_irq();
   while (1)
   {
+	  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+	  HAL_Delay(500);
   }
   /* USER CODE END Error_Handler_Debug */
 }
