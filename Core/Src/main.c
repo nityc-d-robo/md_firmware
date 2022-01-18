@@ -471,7 +471,7 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void initDriver(uint16_t motor_max_rpm_, uint16_t gear_rate_, bool angle_reset_){
+void initDriver(uint16_t motor_max_rpm_, uint8_t gear_rate_, bool angle_reset_){
 	if(motor_max_rpm_ != 0u){
 		motor_max_rpm = motor_max_rpm;
 	}
@@ -659,17 +659,21 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 			stopAll();
 		}else{
 			switch(rx_data[0]){
+				case INIT:
+					HAL_GPIO
+					initDriver((uint16_t)(rx_data[1]<<8 | rx_data[2]), rx_data[3], (bool)rx_data[4]);
+					break;
 				case PWM:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-					simplePWM((bool)rx_data[1], ((uint16_t)(rx_data[2])<<8 | rx_data[3]));
+					simplePWM((bool)rx_data[1], (uint16_t)(rx_data[2]<<8 | rx_data[3]));
 					break;
 				case SPEED:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-					initSpeed((bool)rx_data[1], ((uint16_t)(rx_data[2]<<8 | rx_data[3])), ((uint16_t)(rx_data[4]<<8 | rx_data[5])));
+					initSpeed((bool)rx_data[1], (uint16_t)(rx_data[2]<<8 | rx_data[3]), (uint16_t)(rx_data[4]<<8 | rx_data[5]));
 					break;
 				case LIM_SW:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-					initLimit((bool)rx_data[1], ((uint16_t)(rx_data[2]<<8 | rx_data[3])), (bool)(rx_data[4]));
+					initLimit((bool)rx_data[1], (uint16_t)(rx_data[2]<<8 | rx_data[3]), (bool)(rx_data[4]));
 					break;
 				default:
 					stopAll();
