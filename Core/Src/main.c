@@ -39,6 +39,7 @@ typedef struct PID{
 	uint32_t I_GAIN;
 	uint32_t D_GAIN;
 
+	int32_t diff;
 	int32_t integration;
 }PID;
 
@@ -527,7 +528,7 @@ bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 	encoder_speed.now.cnt = 0u;
 	encoder_speed.now.fusion_cnt = 0;
 
-	encoder_speed.first.cnt = encoder_speed.pre.cnt = TIM2 -> CNT;
+	encoder_speed.first.cnt = encoder_speed.pre.cnt = __HAL_TIM_GET_COUNTER(&htim2);
 	encoder_speed.first.overflow = encoder_speed.pre.overflow = overflow;
 
 	encoder_speed.power = 0u;
@@ -536,6 +537,12 @@ bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 	encoder_speed.average_speed = 0u;
 	encoder_speed.propotion = 0u;
 	encoder_speed.end_cnt = (uint32_t)((end_*SPR*4)/360);
+
+	encoder_speed.speed_pid.P_GAIN = 20;
+	encoder_speed.speed_pid.I_GAIN = 1;
+	encoder_speed.speed_pid.D_GAIN = 10;
+	encoder_speed.speed_pid.diff = 0;
+	encoder_speed.speed_pid.integration = 0;
 
 	__HAL_TIM_CLEAR_FLAG(&htim16, TIM_FLAG_UPDATE);
 	HAL_TIM_Base_Start_IT(&htim16);
@@ -550,7 +557,7 @@ bool rotateSpeed(void){
 	encoder_speed.now.overflow = overflow - encoder_speed.first.overflow;
 	encoder_speed.now.fusion_cnt = encoder_speed.now.cnt + encoder_speed.now.overflow * 65535;
 
-	if(abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.first.cnt)) >= encoder_speed.end_cnt-5){				//将来的にPD制御に
+	if(abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.first.cnt)) >= encoder_speed.end_cnt-5){				//change PID someday
 		finishSpeed();
 		return false;
 	}
@@ -559,7 +566,10 @@ bool rotateSpeed(void){
 	if(encoder_speed.speeds.now_point >= encoder_speed.speeds.buf_num){
 		encoder_speed.speeds.now_point = 0;
 	}
-	encoder_speed.average_speed = (encoder_speed.speeds.buf[0] + encoder_speed.speeds.buf[1] + encoder_speed.speeds.buf[2] + encoder_speed.speeds.buf[3]) / 4;
+	encoder_speed.average_speed = (encoder_speed.speeds.buf[0] + encoder_speed.speeds.buf[1] + encoder_speed.speeds.buf[2] + encoder_speed.speeds.buf[3]) / encoder_speed.speeds.buf_num;
+
+	encoder_speed.speed_pid.diff = encoder_speed.target_speed - encoder_speed.average_speed;
+	encoder_speed.speed_pid.integration += encoder_speed.speed_pid.diff;
 
 	encoder_speed.propotion = ((encoder_speed.target_speed - encoder_speed.average_speed) * SPEED_P) / encoder_speed.target_speed;
 	encoder_speed.power = (int32_t)(encoder_speed.pre_power + encoder_speed.propotion);
