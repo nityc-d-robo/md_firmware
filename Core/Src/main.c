@@ -1,6 +1,6 @@
 /* USER CODE BEGIN Header */
-//Ver 1.0.0 2021/08/08 k-trash
-//ver 1.0.0 complete
+//Ver 2.0.0 2022/01/19 k-trash
+//writing...
 /**
   ******************************************************************************
   * @file           : main.c
@@ -34,6 +34,14 @@ typedef enum Mode{
 	INIT, PWM, SPEED, ANGLE, LIM_SW, STATUS
 }Mode;
 
+typedef struct PID{
+	uint32_t P_GAIN;
+	uint32_t I_GAIN;
+	uint32_t D_GAIN;
+
+	int32_t integration;
+}PID;
+
 typedef struct Encoder{
 	uint16_t cnt;
 	int16_t overflow;
@@ -48,19 +56,20 @@ typedef struct RingBuf{
 
 typedef struct EncoderSpeed{
 	bool phase;
-	uint16_t rpm, end;
-	uint16_t pre_power;
-	int32_t power;
-	int32_t end_power;
-	float target_speed;
-	uint32_t now_speed;
-	uint32_t average_speed;
+	uint16_t rpm, end;		//Given first
+
+	uint16_t pre_power;		//previous power [pwm]
+	int32_t power;			//calculated from current rpm [pwm]
+	int32_t end_power;		//calculated from end count [pwm]
+
+	uint32_t target_speed;	//calculated from "rpm" [slit]
+	uint32_t average_speed;	//calculated from ring buffer "speeds" [rpm]
 	int32_t propotion;
-	uint32_t end_cnt;
-	RingBuf speeds;
-	Encoder first;		//初期状態
-	Encoder pre;			//前ループ時
-	Encoder now;			//現在
+	uint32_t end_cnt;			//calculated from "end" [slit]
+	RingBuf speeds;			//ring buffer for save past speeds
+	Encoder first;			//first count status
+	Encoder pre;				//at previous loop
+	Encoder now;				//now count
 }EncoderSpeed;
 
 typedef struct LimitSwitch{
@@ -75,7 +84,7 @@ typedef struct LimitSwitch{
 #define SPR 48			//Slit Per Rotation
 #define SPEED_P 100
 #define END_P 20
-#define SPEED_RATE 200  //Hz
+#define SPEED_RATE 200  //control rate [Hz]
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -518,8 +527,7 @@ bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 
 	encoder_speed.power = 0u;
 	encoder_speed.pre_power = 0u;
-	encoder_speed.target_speed = (float)((rpm_*SPR*4)/(60*SPEED_RATE));
-	encoder_speed.now_speed = 0u;
+	encoder_speed.target_speed = (uint32_t)((rpm_*SPR*4)/(60*SPEED_RATE));
 	encoder_speed.average_speed = 0u;
 	encoder_speed.propotion = 0u;
 	encoder_speed.end_cnt = (uint32_t)((end_*SPR*4)/360);
@@ -542,14 +550,13 @@ bool rotateSpeed(void){
 		return false;
 	}
 
-	encoder_speed.now_speed = abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.pre.fusion_cnt));
-	encoder_speed.speeds.buf[(encoder_speed.speeds.now_point)++] = encoder_speed.now_speed;
+	encoder_speed.speeds.buf[(encoder_speed.speeds.now_point)++] = abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.pre.fusion_cnt));
 	if(encoder_speed.speeds.now_point >= encoder_speed.speeds.buf_num){
 		encoder_speed.speeds.now_point = 0;
 	}
 	encoder_speed.average_speed = (encoder_speed.speeds.buf[0] + encoder_speed.speeds.buf[1] + encoder_speed.speeds.buf[2] + encoder_speed.speeds.buf[3]) / 4;
 
-	encoder_speed.propotion = ((encoder_speed.target_speed - encoder_speed.average_speed) / encoder_speed.target_speed) * SPEED_P;
+	encoder_speed.propotion = ((encoder_speed.target_speed - encoder_speed.average_speed) * SPEED_P) / encoder_speed.target_speed;
 	encoder_speed.power = (int32_t)(encoder_speed.pre_power + encoder_speed.propotion);
 
 	encoder_speed.end_power = END_P * (encoder_speed.end_cnt - abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.first.cnt)));
@@ -660,7 +667,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 		}else{
 			switch(rx_data[0]){
 				case INIT:
-					HAL_GPIO
+					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
 					initDriver((uint16_t)(rx_data[1]<<8 | rx_data[2]), rx_data[3], (bool)rx_data[4]);
 					break;
 				case PWM:
