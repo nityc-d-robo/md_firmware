@@ -66,10 +66,15 @@ typedef struct EncoderSpeed{
 	uint32_t average_speed;	//calculated from ring buffer "speeds" [rpm]
 	int32_t propotion;
 	uint32_t end_cnt;			//calculated from "end" [slit]
+
 	RingBuf speeds;			//ring buffer for save past speeds
+
 	Encoder first;			//first count status
 	Encoder pre;				//at previous loop
 	Encoder now;				//now count
+
+	PID speed_pid;
+	PID end_pid;
 }EncoderSpeed;
 
 typedef struct LimitSwitch{
@@ -111,7 +116,7 @@ static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM16_Init(void);
 /* USER CODE BEGIN PFP */
-void initDriver(uint16_t motor_max_rpm_, uint16_t gear_rate_, bool angle_reset_);
+void initDriver(uint16_t motor_max_rpm_, uint8_t gear_rate_, bool angle_reset_);
 
 bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_);
 bool rotateSpeed(void);
@@ -489,7 +494,7 @@ void initDriver(uint16_t motor_max_rpm_, uint8_t gear_rate_, bool angle_reset_){
 	}
 	if(angle_reset_){
 		overflow = 0;
-		__HAL_TIM_SET_COUNTER(&htim3, 0u);
+		__HAL_TIM_SET_COUNTER(&htim2, 0u);
 	}
 }
 
@@ -541,7 +546,7 @@ bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 }
 
 bool rotateSpeed(void){
-	encoder_speed.now.cnt = TIM2 -> CNT;
+	encoder_speed.now.cnt = __HAL_TIM_GET_COUNTER(&htim2);
 	encoder_speed.now.overflow = overflow - encoder_speed.first.overflow;
 	encoder_speed.now.fusion_cnt = encoder_speed.now.cnt + encoder_speed.now.overflow * 65535;
 
