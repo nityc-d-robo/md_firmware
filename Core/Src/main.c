@@ -39,6 +39,7 @@ typedef struct PID{
 	uint32_t I_GAIN;
 	uint32_t D_GAIN;
 
+	int32_t propotion;
 	int32_t diff;
 	int32_t integration;
 }PID;
@@ -59,16 +60,15 @@ typedef struct EncoderSpeed{
 	bool phase;
 	uint16_t rpm, end;		//Given first
 
-	uint16_t pre_power;		//previous power [pwm]
 	int32_t power;			//calculated from current rpm [pwm]
 	int32_t end_power;		//calculated from end count [pwm]
 
 	uint32_t target_speed;	//calculated from "rpm" [slit]
-	uint32_t average_speed;	//calculated from ring buffer "speeds" [rpm]
-	int32_t propotion;
+	int32_t delta;			//control amount
 	uint32_t end_cnt;			//calculated from "end" [slit]
 
-	RingBuf speeds;			//ring buffer for save past speeds
+	RingBuf speeds;			//ring buffer for save past speeds [slit]
+	RingBuf average_speed;	//ring buffer for save now speed and previous speed [slit]
 
 	Encoder first;			//first count status
 	Encoder pre;				//at previous loop
@@ -512,6 +512,14 @@ bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 		return false;
 	}
 
+	encoder_speed.average_speed.buf_num = 2u;
+	encoder_speed.average_speed.now_point = 0u;
+	encoder_speed.average_speed.buf = calloc(encoder_speed.average_speed.buf_num, sizeof(uint16_t));
+	if(encoder_speed.average_speed.buf == NULL){
+		stopAll();
+		return false;
+	}
+
 	encoder_speed.phase = phase_;
 	encoder_speed.rpm = rpm_;
 	encoder_speed.end = end_;
@@ -532,15 +540,14 @@ bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 	encoder_speed.first.overflow = encoder_speed.pre.overflow = overflow;
 
 	encoder_speed.power = 0u;
-	encoder_speed.pre_power = 0u;
 	encoder_speed.target_speed = (uint32_t)((rpm_*SPR*4)/(60*SPEED_RATE));
-	encoder_speed.average_speed = 0u;
-	encoder_speed.propotion = 0u;
+	encoder_speed.delta = 0u;
 	encoder_speed.end_cnt = (uint32_t)((end_*SPR*4)/360);
 
 	encoder_speed.speed_pid.P_GAIN = 20;
 	encoder_speed.speed_pid.I_GAIN = 1;
 	encoder_speed.speed_pid.D_GAIN = 10;
+	encoder_speed.speed_pid.propotion = 0;
 	encoder_speed.speed_pid.diff = 0;
 	encoder_speed.speed_pid.integration = 0;
 
@@ -566,32 +573,37 @@ bool rotateSpeed(void){
 	if(encoder_speed.speeds.now_point >= encoder_speed.speeds.buf_num){
 		encoder_speed.speeds.now_point = 0;
 	}
-	encoder_speed.average_speed = (encoder_speed.speeds.buf[0] + encoder_speed.speeds.buf[1] + encoder_speed.speeds.buf[2] + encoder_speed.speeds.buf[3]) / encoder_speed.speeds.buf_num;
+	encoder_speed.average_speed.now_point = 1 - encoder_speed.average_speed.now_point;
+	encoder_speed.average_speed.buf[encoder_speed.average_speed.now_point] = (encoder_speed.speeds.buf[0] + encoder_speed.speeds.buf[1] + encoder_speed.speeds.buf[2] + encoder_speed.speeds.buf[3]) / encoder_speed.speeds.buf_num;
 
-	encoder_speed.speed_pid.diff = encoder_speed.target_speed - encoder_speed.average_speed;
-	encoder_speed.speed_pid.integration += encoder_speed.speed_pid.diff;
+	encoder_speed.speed_pid.propotion = encoder_speed.target_speed - encoder_speed.average_speed;
+	encoder_speed.speed_pid.integration += encoder_speed.speed_pid.propotion;
+	encoder_speed.speed_pid.diff = encoder_speed.average_speed.buf[encoder_speed.average_speed.now_point] - encoder_speed.average_speed.buf[1-encoder_speed.average_speed.now_point];
 
-	encoder_speed.propotion = ((encoder_speed.target_speed - encoder_speed.average_speed) * SPEED_P) / encoder_speed.target_speed;
-	encoder_speed.power = (int32_t)(encoder_speed.pre_power + encoder_speed.propotion);
+	encoder_speed.delta = encoder_speed.speed_pid.propotion*encoder_speed.speed_pid.P_GAIN + encoder_speed.speed_pid.integration*encoder_speed.speed_pid.I_GAIN/SPEED_RATE - encoder_speed.speed_pid.diff*encoder_speed.speed_pid.D_GAIN*SPEED_RATE;
+	encoder_speed.power += encoder_speed.delta;
 
-	encoder_speed.end_power = END_P * (encoder_speed.end_cnt - abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.first.cnt)));
+	if(encoder_speed.end){
+		encoder_speed.end_power = END_P * (encoder_speed.end_cnt - abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.first.cnt)));
 
-	if(encoder_speed.power > encoder_speed.end_power){
-		encoder_speed.power = encoder_speed.end_power;
+		if(encoder_speed.power > encoder_speed.end_power){
+			encoder_speed.power = encoder_speed.end_power;
+		}
 	}
 
+	if(encoder_speed.now.fusion_cnt == encoder_speed.first.cnt){
+		encoder_speed.power = (motor_max_rpm*SPR*4) / (60*SPEED_RATE*gear_rate) * 999 / encoder_speed.target_speed;
+	}
 	if(encoder_speed.power > 999){
 		encoder_speed.power = 999;
-	}
-	if((encoder_speed.power < 400) || (encoder_speed.now.fusion_cnt == encoder_speed.first.cnt)){
-		encoder_speed.power = 400;
+	}else if(encoder_speed.power < 100){
+		encoder_speed.power = 100;
 	}
 
 	simplePWM(encoder_speed.phase, encoder_speed.power);
 	encoder_speed.pre.cnt = encoder_speed.now.cnt;
 	encoder_speed.pre.overflow = encoder_speed.now.overflow;
 	encoder_speed.pre.fusion_cnt = encoder_speed.now.fusion_cnt;
-	encoder_speed.pre_power = encoder_speed.power;
 
 	return true;
 }
@@ -600,6 +612,7 @@ void finishSpeed(void){
 	simplePWM(encoder_speed.phase, 0);
 	HAL_TIM_Base_Stop_IT(&htim16);
 	free(encoder_speed.speeds.buf);
+	free(encoder_speed.average_speed.buf);
 	speed_flag = false;
 }
 
