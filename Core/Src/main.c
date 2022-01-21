@@ -1,5 +1,5 @@
 /* USER CODE BEGIN Header */
-//Ver 2.0.0 2022/01/19 k-trash
+//Ver 2.0.0 2022/01/21 k-trash
 //writing...
 /**
   ******************************************************************************
@@ -575,7 +575,7 @@ bool rotateSpeed(void){
 	encoder_speed.now.overflow = overflow - encoder_speed.first.overflow;
 	encoder_speed.now.fusion_cnt = encoder_speed.now.cnt + encoder_speed.now.overflow * 65535;
 
-	if(abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.first.cnt)) >= encoder_speed.end_cnt-5){				//change PID someday
+	if(encoder_speed.power < 200 && abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.first.cnt)) >= encoder_speed.end_cnt-5){				//change PID someday
 		finishSpeed();
 		return false;
 	}
@@ -609,13 +609,23 @@ bool rotateSpeed(void){
 	if(encoder_speed.now.fusion_cnt == encoder_speed.first.cnt){
 		encoder_speed.power = (motor_max_rpm*SPR*4) / (60*SPEED_RATE*gear_rate) * 999 / encoder_speed.target_speed;
 	}
-	if(encoder_speed.power > 999){
-		encoder_speed.power = 999;
-	}else if(encoder_speed.power < 100){
-		encoder_speed.power = 100;
+
+	if(encoder_speed.power >= 0){
+		if(encoder_speed.power > 999){
+			encoder_speed.power = 999;
+		}else if(encoder_speed.power < 100){
+			encoder_speed.power = 100;
+		}
+		simplePWM(encoder_speed.phase, encoder_speed.power);
+	}else{
+		if(encoder_speed.power < -999){
+			encoder_speed.power = -999;
+		}else if(encoder_speed.power > -100){
+			encoder_speed.power = -100;
+		}
+		simplePWM(!encoder_speed.phase, -encoder_speed.power);
 	}
 
-	simplePWM(encoder_speed.phase, encoder_speed.power);
 	encoder_speed.pre.cnt = encoder_speed.now.cnt;
 	encoder_speed.pre.overflow = encoder_speed.now.overflow;
 	encoder_speed.pre.fusion_cnt = encoder_speed.now.fusion_cnt;
