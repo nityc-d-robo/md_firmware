@@ -81,7 +81,6 @@ typedef struct EncoderSpeed{
 typedef struct LimitSwitch{
 	bool port;
 	bool phase;
-	uint16_t power;
 }LimitSwitch;
 /* USER CODE END PTD */
 
@@ -121,7 +120,7 @@ bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_);
 bool rotateSpeed(void);
 void finishSpeed(void);
 
-void initLimit(bool phase_, uint16_t power_, bool port_);
+void initLimit(bool phase_, uint16_t rpm_, bool port_);
 void finishLimit(void);
 
 void stopAll(void);
@@ -652,9 +651,8 @@ void simplePWM(bool phase_, uint16_t power_){
 	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, power_);
 }
 
-void initLimit(bool phase_, uint16_t power_, bool port_){
+void initLimit(bool phase_, uint16_t rpm_, bool port_){
 	limit_switch.phase = phase_;
-	limit_switch.power = power_;
 	limit_switch.port = port_;
 
 	if(!port_){
@@ -665,9 +663,7 @@ void initLimit(bool phase_, uint16_t power_, bool port_){
 
 	limit_flag = true;
 
-	simplePWM(phase_, power_);
-
-	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+	initSpeed(limit_switch.phase, rpm_, 0u);
 }
 
 void finishLimit(void){
@@ -678,6 +674,8 @@ void finishLimit(void){
 	}
 
 	limit_flag = false;
+
+	finishSpeed();
 
 	simplePWM(limit_switch.phase, 0u);
 }
@@ -711,10 +709,10 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 	uint8_t rx_data[6] = { 0u };
 	if (HAL_CAN_GetRxMessage(hcan_, CAN_RX_FIFO0, &RxHeader, rx_data) == HAL_OK){
 		receive_id = (RxHeader.IDE == CAN_ID_STD)? RxHeader.StdId : RxHeader.ExtId;
-		if(speed_flag){
-			finishSpeed();
-		}else if(limit_flag){
+		if(limit_flag){
 			finishLimit();
+		}else if(speed_flag){
+			finishSpeed();
 		}
 		if(receive_id == 0x100){
 			stopAll();
