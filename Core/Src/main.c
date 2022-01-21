@@ -88,6 +88,8 @@ typedef struct LimitSwitch{
 /* USER CODE BEGIN PD */
 #define SPR 48			//Slit Per Rotation
 #define SPEED_RATE 200  //control rate [Hz]
+#define CAN_SIZE 6		//CAN send data size[Byte]
+#define MASTER_ADDRESS 0x300		//master Address
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -123,6 +125,8 @@ void finishSpeed(void);
 void initLimit(bool phase_, uint16_t rpm_, bool port_);
 void finishLimit(void);
 
+void returnStatus(bool angle_flag_);
+
 void stopAll(void);
 void simplePWM(bool phase_, uint16_t power_);
 
@@ -136,11 +140,13 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_);
 volatile EncoderSpeed encoder_speed;
 volatile LimitSwitch limit_switch;
 
+uint32_t id_own = 0u;							//CAN ID
+
 volatile int32_t overflow = 0;
 volatile bool speed_flag = false;
 volatile bool limit_flag = false;
 
-volatile uint16_t motor_max_rpm = 20400u;
+volatile uint16_t motor_max_rpm = 20400u;		//maximum motor rpm[rpm]
 volatile uint16_t gear_rate = 1u;
 /* USER CODE END 0 */
 
@@ -250,8 +256,7 @@ static void MX_CAN_Init(void)
   /* USER CODE BEGIN CAN_Init 0 */
 	CAN_FilterTypeDef filter;
 	uint32_t id_sw = 0u;
-	uint32_t id_all = 0x100 << 21;		//共通ID(非常停止用)
-	uint32_t id_own = 0u;				//基板のID
+	uint32_t id_all = 0x100 << 21;		//common ID
   /* USER CODE END CAN_Init 0 */
 
   /* USER CODE BEGIN CAN_Init 1 */
@@ -680,6 +685,36 @@ void finishLimit(void){
 	simplePWM(limit_switch.phase, 0u);
 }
 
+void returnStatus(bool angle_flag_){
+	CAN_TxHeaderTypeDef TxHeader;
+	uint32_t tx_mailbox;
+	uint8_t tx_datas[CAN_SIZE];
+
+	int32_t abs_angle = (__HAL_TIM_GET_COUNTER(&htim2) + overflow*65535) * 360 / (4*SPR);
+	int8_t rotation = abs_angle / 360;
+
+	abs_angle %= 180;
+
+	if(!angle_flag_ && abs_angle < 0){
+		abs_angle += 360;
+	}
+
+	while(HAL_CAN_GetTxMailboxesFreeLevel(&hcan) <= 0);
+
+	TxHeader.StdId = MASTER_ADDRESS;
+	TxHeader.RTR = CAN_RTR_DATA;
+	TxHeader.IDE = CAN_ID_STD;
+	TxHeader.DLC = CAN_SIZE;
+	TxHeader.TransmitGlobalTime = DISABLE;
+	tx_datas[0] = id_own;
+	tx_datas[1] = 20;														//Ver2.0
+	tx_datas[2] = (uint8_t)((((int16_t)abs_angle) << 8) & 0xff);	//encoder_status;
+	tx_datas[3] = (uint8_t)(abs_angle & 0xff);
+	tx_datas[4] = rotation & 0xff;
+	tx_datas[5] = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) << 1 | HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1);
+	HAL_CAN_AddTxMessage(&hcan, &TxHeader, tx_datas, &tx_mailbox);
+}
+
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_){
 	if(htim_->Instance == TIM2){
 		__HAL_TIM_CLEAR_FLAG(&htim2, TIM_IT_UPDATE);
@@ -706,7 +741,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t gpio_pin_){
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 	CAN_RxHeaderTypeDef RxHeader;
 	uint32_t receive_id = 0u;
-	uint8_t rx_data[6] = { 0u };
+	uint8_t rx_data[CAN_SIZE] = { 0u };
 	if (HAL_CAN_GetRxMessage(hcan_, CAN_RX_FIFO0, &RxHeader, rx_data) == HAL_OK){
 		receive_id = (RxHeader.IDE == CAN_ID_STD)? RxHeader.StdId : RxHeader.ExtId;
 		if(limit_flag){
