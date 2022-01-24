@@ -31,7 +31,7 @@
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 typedef enum Mode{
-	INIT, PWM, SPEED, ANGLE, LIM_SW, STATUS
+	INIT, STATUS, PWM, SPEED, ANGLE, LIM_SW
 }Mode;
 
 typedef struct Encoder{
@@ -118,14 +118,16 @@ static void MX_TIM16_Init(void);
 /* USER CODE BEGIN PFP */
 void initDriver(uint16_t motor_max_rpm_, uint8_t gear_rate_, bool angle_reset_);
 
+void returnStatus(bool angle_flag_);
+
 bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_);
 bool rotateSpeed(void);
 void finishSpeed(void);
 
+void initAngle(bool phase_, uint16_t rpm_, uint16_t angle_);
+
 void initLimit(bool phase_, uint16_t rpm_, bool port_);
 void finishLimit(void);
-
-void returnStatus(bool angle_flag_);
 
 void stopAll(void);
 void simplePWM(bool phase_, uint16_t power_);
@@ -646,6 +648,19 @@ void finishSpeed(void){
 	speed_flag = false;
 }
 
+void initAngle(bool phase_, uint16_t rpm_, uint16_t angle_){
+	int32_t abs_angle = (__HAL_TIM_GET_COUNTER(&htim2) + overflow*65535) * 360 / (4*SPR);
+
+	abs_angle %= 180;
+	abs_angle += 360;
+
+	if(abs(angle_-abs_angle) <= 180){
+		initSpeed(phase_, rpm_, abs(angle_-abs_angle));
+	}else{
+		initSpeed(!phase_, rpm_, 360-abs(angle_-abs_angle));
+	}
+}
+
 void stopAll(void){
 	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
 	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
@@ -757,6 +772,10 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
 					initDriver((uint16_t)(rx_data[1]<<8 | rx_data[2]), rx_data[3], (bool)rx_data[4]);
 					break;
+				case STATUS:
+					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
+					returnStatus((bool)rx_data[1]);
+					break;
 				case PWM:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
 					simplePWM((bool)rx_data[1], (uint16_t)(rx_data[2]<<8 | rx_data[3]));
@@ -765,13 +784,13 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
 					initSpeed((bool)rx_data[1], (uint16_t)(rx_data[2]<<8 | rx_data[3]), (uint16_t)(rx_data[4]<<8 | rx_data[5]));
 					break;
+				case ANGLE:
+					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
+					initAngle((bool)rx_data[1], (uint16_t)(rx_data[2]<<8 | rx_data[3]), (uint16_t)(rx_data[4]<<8 | rx_data[5]));
+					break;
 				case LIM_SW:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
 					initLimit((bool)rx_data[1], (uint16_t)(rx_data[2]<<8 | rx_data[3]), (bool)(rx_data[4]));
-					break;
-				case STATUS:
-					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-					returnStatus((bool)rx_data[1]);
 					break;
 				default:
 					stopAll();
