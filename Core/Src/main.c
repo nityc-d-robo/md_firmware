@@ -503,6 +503,36 @@ void initDriver(uint16_t motor_max_rpm_, uint8_t gear_rate_, bool angle_reset_){
 	}
 }
 
+void returnStatus(bool angle_flag_){
+	CAN_TxHeaderTypeDef TxHeader;
+	uint32_t tx_mailbox;
+	uint8_t tx_datas[CAN_SIZE];
+
+	int32_t abs_angle = (__HAL_TIM_GET_COUNTER(&htim2) + overflow*65535) * 360 / (4*SPR);
+	int8_t rotation = abs_angle / 360;
+
+	abs_angle %= 180;
+
+	if(!angle_flag_ && abs_angle < 0){
+		abs_angle += 360;
+	}
+
+	while(HAL_CAN_GetTxMailboxesFreeLevel(&hcan) <= 0);
+
+	TxHeader.StdId = MASTER_ADDRESS;
+	TxHeader.RTR = CAN_RTR_DATA;
+	TxHeader.IDE = CAN_ID_STD;
+	TxHeader.DLC = CAN_SIZE;
+	TxHeader.TransmitGlobalTime = DISABLE;
+	tx_datas[0] = id_own;
+	tx_datas[1] = 20;														//Ver2.0
+	tx_datas[2] = (uint8_t)((((int16_t)abs_angle) << 8) & 0xff);	//encoder_status;
+	tx_datas[3] = (uint8_t)(abs_angle & 0xff);
+	tx_datas[4] = rotation & 0xff;
+	tx_datas[5] = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) << 1 | HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1);
+	HAL_CAN_AddTxMessage(&hcan, &TxHeader, tx_datas, &tx_mailbox);
+}
+
 bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 	if(rpm_ == 0){
 		return false;
@@ -698,36 +728,6 @@ void finishLimit(void){
 	finishSpeed();
 
 	simplePWM(limit_switch.phase, 0u);
-}
-
-void returnStatus(bool angle_flag_){
-	CAN_TxHeaderTypeDef TxHeader;
-	uint32_t tx_mailbox;
-	uint8_t tx_datas[CAN_SIZE];
-
-	int32_t abs_angle = (__HAL_TIM_GET_COUNTER(&htim2) + overflow*65535) * 360 / (4*SPR);
-	int8_t rotation = abs_angle / 360;
-
-	abs_angle %= 180;
-
-	if(!angle_flag_ && abs_angle < 0){
-		abs_angle += 360;
-	}
-
-	while(HAL_CAN_GetTxMailboxesFreeLevel(&hcan) <= 0);
-
-	TxHeader.StdId = MASTER_ADDRESS;
-	TxHeader.RTR = CAN_RTR_DATA;
-	TxHeader.IDE = CAN_ID_STD;
-	TxHeader.DLC = CAN_SIZE;
-	TxHeader.TransmitGlobalTime = DISABLE;
-	tx_datas[0] = id_own;
-	tx_datas[1] = 20;														//Ver2.0
-	tx_datas[2] = (uint8_t)((((int16_t)abs_angle) << 8) & 0xff);	//encoder_status;
-	tx_datas[3] = (uint8_t)(abs_angle & 0xff);
-	tx_datas[4] = rotation & 0xff;
-	tx_datas[5] = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) << 1 | HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1);
-	HAL_CAN_AddTxMessage(&hcan, &TxHeader, tx_datas, &tx_mailbox);
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_){
