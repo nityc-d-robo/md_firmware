@@ -116,7 +116,7 @@ static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM16_Init(void);
 /* USER CODE BEGIN PFP */
-void initDriver(uint16_t motor_max_rpm_, uint8_t gear_rate_, bool angle_reset_);
+void initDriver(bool angle_reset_ ,uint16_t motor_max_rpm_, uint8_t gear_rate_);
 
 void returnStatus(bool angle_flag_);
 
@@ -490,7 +490,7 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void initDriver(uint16_t motor_max_rpm_, uint8_t gear_rate_, bool angle_reset_){
+void initDriver(bool angle_reset_, uint16_t motor_max_rpm_, uint8_t gear_rate_){
 	if(motor_max_rpm_ != 0u){
 		motor_max_rpm = motor_max_rpm;
 	}
