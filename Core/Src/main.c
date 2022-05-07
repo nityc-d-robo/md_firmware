@@ -47,9 +47,9 @@ typedef struct RingBuf{
 }RingBuf;
 
 typedef struct PID{
-	uint32_t P_GAIN;
-	uint32_t I_GAIN;
-	uint32_t D_GAIN;
+	float P_GAIN;
+	float I_GAIN;
+	float D_GAIN;
 
 	RingBuf propotion;
 	int32_t diff;
@@ -588,13 +588,13 @@ bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 
 	encoder_speed.speed_pid.P_GAIN = 20;
 	encoder_speed.speed_pid.I_GAIN = 1;
-	encoder_speed.speed_pid.D_GAIN = 10;
+	encoder_speed.speed_pid.D_GAIN = 0.1;
 	encoder_speed.speed_pid.diff = 0;
 	encoder_speed.speed_pid.integration = 0;
 
-	encoder_speed.end_pid.P_GAIN = 100;
-	encoder_speed.end_pid.I_GAIN = 1;
-	encoder_speed.end_pid.D_GAIN = 10;
+	encoder_speed.end_pid.P_GAIN = 30;
+	encoder_speed.end_pid.I_GAIN = 0.1f;
+	encoder_speed.end_pid.D_GAIN = 1;
 	encoder_speed.end_pid.diff = 0;
 	encoder_speed.end_pid.integration = 0;
 
@@ -635,7 +635,7 @@ bool rotateSpeed(void){
 		encoder_speed.end_pid.propotion.buf[encoder_speed.end_pid.propotion.now_point] = encoder_speed.end_cnt - abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.first.cnt));
 		encoder_speed.end_pid.integration += encoder_speed.end_pid.propotion.buf[encoder_speed.speed_pid.propotion.now_point];
 		encoder_speed.end_pid.diff = encoder_speed.end_pid.propotion.buf[encoder_speed.end_pid.propotion.now_point] - encoder_speed.end_pid.propotion.buf[1-encoder_speed.end_pid.propotion.now_point];
-		encoder_speed.end_power = encoder_speed.end_pid.P_GAIN*encoder_speed.end_pid.propotion.buf[encoder_speed.end_pid.propotion.now_point] + encoder_speed.end_pid.I_GAIN*encoder_speed.end_pid.integration + encoder_speed.end_pid.D_GAIN*encoder_speed.end_pid.diff;
+		encoder_speed.end_power = encoder_speed.end_pid.P_GAIN*encoder_speed.end_pid.propotion.buf[encoder_speed.end_pid.propotion.now_point] + encoder_speed.end_pid.I_GAIN*encoder_speed.end_pid.integration/SPEED_RATE + encoder_speed.end_pid.D_GAIN*encoder_speed.end_pid.diff*SPEED_RATE;
 
 		if(encoder_speed.power > encoder_speed.end_power){
 			encoder_speed.power = encoder_speed.end_power;
@@ -643,7 +643,7 @@ bool rotateSpeed(void){
 	}
 
 	if(encoder_speed.now.fusion_cnt == encoder_speed.first.cnt){
-		encoder_speed.power = (motor_max_rpm*SPR*4) / (60*SPEED_RATE*gear_rate) * 999 / encoder_speed.target_speed;
+		encoder_speed.power = 999 * (60 * SPEED_RATE * gear_rate * encoder_speed.target_speed) / (motor_max_rpm * SPR * 4);
 	}
 
 	if(encoder_speed.power >= 0){
