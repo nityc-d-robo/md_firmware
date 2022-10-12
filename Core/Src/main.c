@@ -35,9 +35,9 @@ typedef enum Mode{
 }Mode;
 
 typedef struct Encoder{
-	uint16_t cnt;
-	int16_t overflow;
-	uint64_t fusion_cnt;		//cnt + overflow * 65535
+	int32_t cnt;
+	int32_t overflow;
+	int64_t fusion_cnt;		//cnt + overflow * 65535
 }Encoder;
 
 typedef struct RingBuf{
@@ -88,7 +88,7 @@ typedef struct LimitSwitch{
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define SPR 512			//Slit Per Rotation
+#define SPR 250			//Slit Per Rotation
 #define SPEED_RATE 200  //control rate [Hz]
 #define CAN_SIZE 6		//CAN send data size[Byte]
 #define MASTER_ADDRESS 0x300		//master Address
@@ -127,7 +127,7 @@ bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_);
 bool rotateSpeed(void);
 void finishSpeed(void);
 
-bool initAngle(bool phase_, uint16_t rpm_, int16_t angle_);
+bool initAngle(bool phase_, uint16_t rpm_, uint16_t angle_);
 
 bool initLimit(bool phase_, uint16_t rpm_, bool port_);
 void finishLimit(void);
@@ -152,6 +152,7 @@ uint32_t id_own = 0u;							//CAN ID
 volatile int32_t overflow = 0;
 volatile bool speed_flag = false;
 volatile bool limit_flag = false;
+volatile bool fire_flag = false;
 
 volatile uint16_t motor_max_rpm = 20400u;		//maximum motor rpm[rpm]
 volatile uint16_t gear_rate = 1u;
@@ -207,7 +208,6 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  HAL_Delay(500);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -548,12 +548,12 @@ bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 	encoder_speed.rpm = rpm_;
 	encoder_speed.end = end_;
 
-	encoder_speed.speed_pid.P_GAIN = 80;
-	encoder_speed.speed_pid.I_GAIN = 0.01;
+	encoder_speed.speed_pid.P_GAIN = 6;
+	encoder_speed.speed_pid.I_GAIN = 0.0001;
 	encoder_speed.speed_pid.D_GAIN = 0.01;
 
-	encoder_speed.end_pid.P_GAIN = 2;
-	encoder_speed.end_pid.I_GAIN = 0.01;
+	encoder_speed.end_pid.P_GAIN = 6;
+	encoder_speed.end_pid.I_GAIN = 0.0001;
 	encoder_speed.end_pid.D_GAIN = 0.01;
 
 	encoder_speed.mode = SPEED;
@@ -623,16 +623,16 @@ bool startSpeed(void){
 }
 
 bool rotateSpeed(void){
-	encoder_speed.now.cnt = __HAL_TIM_GET_COUNTER(&htim2);
+	encoder_speed.now.cnt = __HAL_TIM_GET_COUNTER(&htim2) - encoder_speed.first.cnt;
 	encoder_speed.now.overflow = overflow - encoder_speed.first.overflow;
 	encoder_speed.now.fusion_cnt = encoder_speed.now.cnt + encoder_speed.now.overflow * 65535;
 
-	if(abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.first.cnt)) >= encoder_speed.end_cnt-5 && encoder_speed.end != 0){				//change PID someday
+	if(abs((int)encoder_speed.now.fusion_cnt) >= (int)encoder_speed.end_cnt-5 && encoder_speed.end != 0){				//change PID someday
 		finishSpeed();
 		return false;
 	}
 
-	encoder_speed.speeds.buf[(encoder_speed.speeds.now_point)++] = abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.pre.fusion_cnt));
+	encoder_speed.speeds.buf[(encoder_speed.speeds.now_point)++] = abs((int)(encoder_speed.now.fusion_cnt - encoder_speed.pre.fusion_cnt));
 	if(encoder_speed.speeds.now_point >= encoder_speed.speeds.buf_num){
 		encoder_speed.speeds.now_point = 0;
 	}
@@ -646,14 +646,18 @@ bool rotateSpeed(void){
 	encoder_speed.delta = encoder_speed.speed_pid.P_GAIN*encoder_speed.speed_pid.propotion.buf[encoder_speed.speed_pid.propotion.now_point] + encoder_speed.speed_pid.I_GAIN*encoder_speed.speed_pid.integration/SPEED_RATE + encoder_speed.speed_pid.D_GAIN*encoder_speed.speed_pid.diff*SPEED_RATE;
 	encoder_speed.power += encoder_speed.delta;
 
+	if(fire_flag){
+		encoder_speed.power = 600;
+	}
+
 	if(encoder_speed.end){
 		encoder_speed.end_pid.propotion.now_point = 1 - encoder_speed.end_pid.propotion.now_point;
-		encoder_speed.end_pid.propotion.buf[encoder_speed.end_pid.propotion.now_point] = encoder_speed.end_cnt - abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.first.cnt));
+		encoder_speed.end_pid.propotion.buf[encoder_speed.end_pid.propotion.now_point] = encoder_speed.end_cnt - abs((int)encoder_speed.now.fusion_cnt);
 		encoder_speed.end_pid.integration += encoder_speed.end_pid.propotion.buf[encoder_speed.speed_pid.propotion.now_point];
 		encoder_speed.end_pid.diff = encoder_speed.end_pid.propotion.buf[encoder_speed.end_pid.propotion.now_point] - encoder_speed.end_pid.propotion.buf[1-encoder_speed.end_pid.propotion.now_point];
 		encoder_speed.end_power = encoder_speed.end_pid.P_GAIN*encoder_speed.end_pid.propotion.buf[encoder_speed.end_pid.propotion.now_point] + encoder_speed.end_pid.I_GAIN*encoder_speed.end_pid.integration/SPEED_RATE + encoder_speed.end_pid.D_GAIN*encoder_speed.end_pid.diff*SPEED_RATE;
 
-		if(abs(encoder_speed.power) > abs(encoder_speed.end_power)){
+		if(abs((int)encoder_speed.power) > abs((int)encoder_speed.end_power)){
 			encoder_speed.power = encoder_speed.end_power;
 		}
 	}
@@ -665,8 +669,8 @@ bool rotateSpeed(void){
 	encoder_speed.power = abs(encoder_speed.power);
 	if(encoder_speed.power > 999){
 		encoder_speed.power = 999;
-	}else if(encoder_speed.power < 100){
-		encoder_speed.power = 100;
+	}else if(encoder_speed.power < 150){
+		encoder_speed.power = 150;
 	}
 	simplePWM(encoder_speed.phase, encoder_speed.power);
 
@@ -684,15 +688,18 @@ void finishSpeed(void){
 	free(encoder_speed.speed_pid.propotion.buf);
 	free(encoder_speed.end_pid.propotion.buf);
 	speed_flag = false;
+	fire_flag = false;
 
 	if(encoder_speed.mode == FIRE){
-		initSpeed(!encoder_speed.phase, 3000u, encoder_speed.end);
+		fire_flag = true;
+		initSpeed(!encoder_speed.phase, 400u, encoder_speed.end/2);
 	}
 }
 
-bool initAngle(bool phase_, uint16_t rpm_, int16_t angle_){
-	int32_t abs_angle = abs((__HAL_TIM_GET_COUNTER(&htim2) + overflow*65535) / (4*SPR) * 360);
-	uint16_t target_angle = abs(abs_angle - angle_);
+bool initAngle(bool phase_, uint16_t rpm_, uint16_t angle_){
+	int32_t abs_angle = ((int32_t)(__HAL_TIM_GET_COUNTER(&htim2) + overflow*65535) * (36 / 4) / (SPR / 10));
+	abs_angle = (abs_angle > 0) ? abs_angle : -abs_angle;
+	uint16_t target_angle = (uint16_t)((abs_angle - angle_ > 0) ? (abs_angle - angle_) : (angle_ - abs_angle));
 
 	if(rpm_ == 0){
 		return false;
@@ -706,12 +713,12 @@ bool initAngle(bool phase_, uint16_t rpm_, int16_t angle_){
 	encoder_speed.rpm = rpm_;
 	encoder_speed.end = target_angle;
 
-	encoder_speed.speed_pid.P_GAIN = 50;
-	encoder_speed.speed_pid.I_GAIN = 0.01;
+	encoder_speed.speed_pid.P_GAIN = 6;
+	encoder_speed.speed_pid.I_GAIN = 0.0001;
 	encoder_speed.speed_pid.D_GAIN = 0.01;
 
-	encoder_speed.end_pid.P_GAIN = 2;
-	encoder_speed.end_pid.I_GAIN = 0.01;
+	encoder_speed.end_pid.P_GAIN = 6;
+	encoder_speed.end_pid.I_GAIN = 0.0001;
 	encoder_speed.end_pid.D_GAIN = 0.01;
 
 	encoder_speed.mode = ANGLE;
@@ -749,12 +756,12 @@ bool initLimit(bool phase_, uint16_t rpm_, bool port_){
 	encoder_speed.rpm = rpm_;
 	encoder_speed.end = 0u;
 
-	encoder_speed.speed_pid.P_GAIN = 100;
-	encoder_speed.speed_pid.I_GAIN = 0.01;
+	encoder_speed.speed_pid.P_GAIN = 6;
+	encoder_speed.speed_pid.I_GAIN = 0.0001;
 	encoder_speed.speed_pid.D_GAIN = 0.01;
 
-	encoder_speed.end_pid.P_GAIN = 50;
-	encoder_speed.end_pid.I_GAIN = 0.01;
+	encoder_speed.end_pid.P_GAIN = 6;
+	encoder_speed.end_pid.I_GAIN = 0.0001;
 	encoder_speed.end_pid.D_GAIN = 0.01;
 
 	encoder_speed.mode = LIM_SW;
@@ -789,7 +796,7 @@ bool initFire(bool phase_, uint16_t rpm_, uint16_t end_){
 	encoder_speed.rpm = rpm_;
 	encoder_speed.end = end_;
 
-	encoder_speed.speed_pid.P_GAIN = 250;
+	encoder_speed.speed_pid.P_GAIN = 50;
 	encoder_speed.speed_pid.I_GAIN = 0;
 	encoder_speed.speed_pid.D_GAIN = 0;
 
@@ -861,11 +868,11 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 					break;
 				case ANGLE:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-					initAngle((bool)rx_data[1], (uint16_t)(rx_data[2]<<8 | rx_data[3]), (int16_t)(rx_data[4]<<8 | rx_data[5]));
+					initAngle((bool)rx_data[1], (uint16_t)(rx_data[2]<<8 | rx_data[3]), (uint16_t)(rx_data[4]<<8 | rx_data[5]));
 					break;
 				case LIM_SW:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-					initLimit((bool)rx_data[1], (uint16_t)(rx_data[2]<<8 | rx_data[3]), (bool)(rx_data[4]));
+					initLimit((bool)rx_data[1], (uint16_t)(rx_data[2]<<8 | rx_data[3]), (bool)(rx_data[4] & 0x01));
 					break;
 				case FIRE:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
