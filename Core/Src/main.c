@@ -76,6 +76,8 @@ typedef struct EncoderSpeed{
 
 	PID speed_pid;
 	PID end_pid;
+
+	Mode mode;
 }EncoderSpeed;
 
 typedef struct LimitSwitch{
@@ -86,10 +88,10 @@ typedef struct LimitSwitch{
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define SPR 48			//Slit Per Rotation
+#define SPR 250			//Slit Per Rotation
 #define SPEED_RATE 200  //control rate [Hz]
 #define CAN_SIZE 6		//CAN send data size[Byte]
-#define MASTER_ADDRESS 0x300		//master Address
+#define MASTER_ADDRESS 0x50		//master Address
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -120,13 +122,14 @@ void initDriver(bool angle_reset_ ,uint16_t motor_max_rpm_, uint8_t gear_rate_);
 
 void returnStatus(bool angle_flag_);
 
+bool startSpeed(void);
 bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_);
 bool rotateSpeed(void);
 void finishSpeed(void);
 
-void initAngle(bool phase_, uint16_t rpm_, uint16_t angle_);
+bool initAngle(bool phase_, uint16_t rpm_, uint16_t angle_);
 
-void initLimit(bool phase_, uint16_t rpm_, bool port_);
+bool initLimit(bool phase_, uint16_t rpm_, bool port_);
 void finishLimit(void);
 
 void stopAll(void);
@@ -202,7 +205,6 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  HAL_Delay(500);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -538,6 +540,26 @@ bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 		return false;
 	}
 
+	encoder_speed.phase = phase_;
+	encoder_speed.rpm = rpm_;
+	encoder_speed.end = end_;
+
+	encoder_speed.speed_pid.P_GAIN = 6;
+	encoder_speed.speed_pid.I_GAIN = 0.0001;
+	encoder_speed.speed_pid.D_GAIN = 0.01;
+
+	encoder_speed.end_pid.P_GAIN = 6;
+	encoder_speed.end_pid.I_GAIN = 0.0001;
+	encoder_speed.end_pid.D_GAIN = 0.01;
+
+	encoder_speed.mode = SPEED;
+
+	startSpeed();
+
+	return true;
+}
+
+bool startSpeed(void){
 	encoder_speed.speeds.buf_num = 4u;
 	encoder_speed.speeds.now_point = 0u;
 	encoder_speed.speeds.buf = calloc(encoder_speed.speeds.buf_num, sizeof(int32_t));
@@ -562,10 +584,6 @@ bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 		return false;
 	}
 
-	encoder_speed.phase = phase_;
-	encoder_speed.rpm = rpm_;
-	encoder_speed.end = end_;
-
 	encoder_speed.first.overflow = 0;
 	encoder_speed.first.cnt = 0u;
 	encoder_speed.first.fusion_cnt = 0;
@@ -582,19 +600,13 @@ bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 	encoder_speed.first.overflow = encoder_speed.pre.overflow = overflow;
 
 	encoder_speed.power = 0u;
-	encoder_speed.target_speed = (uint32_t)((rpm_*SPR*4)/(60*SPEED_RATE));
+	encoder_speed.target_speed = (uint32_t)((encoder_speed.rpm*SPR*4)/(60*SPEED_RATE));
 	encoder_speed.delta = 0u;
-	encoder_speed.end_cnt = (uint32_t)((end_*SPR*4)/360);
+	encoder_speed.end_cnt = (uint32_t)((encoder_speed.end*SPR*4)/360);
 
-	encoder_speed.speed_pid.P_GAIN = 20;
-	encoder_speed.speed_pid.I_GAIN = 1;
-	encoder_speed.speed_pid.D_GAIN = 0.1;
 	encoder_speed.speed_pid.diff = 0;
 	encoder_speed.speed_pid.integration = 0;
 
-	encoder_speed.end_pid.P_GAIN = 30;
-	encoder_speed.end_pid.I_GAIN = 0.1f;
-	encoder_speed.end_pid.D_GAIN = 1;
 	encoder_speed.end_pid.diff = 0;
 	encoder_speed.end_pid.integration = 0;
 
@@ -607,16 +619,16 @@ bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 }
 
 bool rotateSpeed(void){
-	encoder_speed.now.cnt = __HAL_TIM_GET_COUNTER(&htim2);
+	encoder_speed.now.cnt = __HAL_TIM_GET_COUNTER(&htim2) - encoder_speed.first.cnt;
 	encoder_speed.now.overflow = overflow - encoder_speed.first.overflow;
 	encoder_speed.now.fusion_cnt = encoder_speed.now.cnt + encoder_speed.now.overflow * 65535;
 
-	if(encoder_speed.power < 200 && abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.first.cnt)) >= encoder_speed.end_cnt-5){				//change PID someday
+	if(abs((int)encoder_speed.now.fusion_cnt) >= (int)encoder_speed.end_cnt-5 && encoder_speed.end != 0){				//change PID someday
 		finishSpeed();
 		return false;
 	}
 
-	encoder_speed.speeds.buf[(encoder_speed.speeds.now_point)++] = abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.pre.fusion_cnt));
+	encoder_speed.speeds.buf[(encoder_speed.speeds.now_point)++] = abs((int)(encoder_speed.now.fusion_cnt - encoder_speed.pre.fusion_cnt));
 	if(encoder_speed.speeds.now_point >= encoder_speed.speeds.buf_num){
 		encoder_speed.speeds.now_point = 0;
 	}
@@ -632,35 +644,27 @@ bool rotateSpeed(void){
 
 	if(encoder_speed.end){
 		encoder_speed.end_pid.propotion.now_point = 1 - encoder_speed.end_pid.propotion.now_point;
-		encoder_speed.end_pid.propotion.buf[encoder_speed.end_pid.propotion.now_point] = encoder_speed.end_cnt - abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.first.cnt));
+		encoder_speed.end_pid.propotion.buf[encoder_speed.end_pid.propotion.now_point] = encoder_speed.end_cnt - abs((int)encoder_speed.now.fusion_cnt);
 		encoder_speed.end_pid.integration += encoder_speed.end_pid.propotion.buf[encoder_speed.speed_pid.propotion.now_point];
 		encoder_speed.end_pid.diff = encoder_speed.end_pid.propotion.buf[encoder_speed.end_pid.propotion.now_point] - encoder_speed.end_pid.propotion.buf[1-encoder_speed.end_pid.propotion.now_point];
 		encoder_speed.end_power = encoder_speed.end_pid.P_GAIN*encoder_speed.end_pid.propotion.buf[encoder_speed.end_pid.propotion.now_point] + encoder_speed.end_pid.I_GAIN*encoder_speed.end_pid.integration/SPEED_RATE + encoder_speed.end_pid.D_GAIN*encoder_speed.end_pid.diff*SPEED_RATE;
 
-		if(encoder_speed.power > encoder_speed.end_power){
+		if(abs((int)encoder_speed.power) > abs((int)encoder_speed.end_power)){
 			encoder_speed.power = encoder_speed.end_power;
 		}
 	}
 
 	if(encoder_speed.now.fusion_cnt == encoder_speed.first.cnt){
-		encoder_speed.power = 999 * (60 * SPEED_RATE * gear_rate * encoder_speed.target_speed) / (motor_max_rpm * SPR * 4);
+		encoder_speed.power = 999 * (60 * SPEED_RATE * gear_rate * encoder_speed.target_speed) / (motor_max_rpm * SPR * 4) + 300;
 	}
 
-	if(encoder_speed.power >= 0){
-		if(encoder_speed.power > 999){
-			encoder_speed.power = 999;
-		}else if(encoder_speed.power < 100){
-			encoder_speed.power = 100;
-		}
-		simplePWM(encoder_speed.phase, encoder_speed.power);
-	}else{
-		if(encoder_speed.power < -999){
-			encoder_speed.power = -999;
-		}else if(encoder_speed.power > -100){
-			encoder_speed.power = -100;
-		}
-		simplePWM(!encoder_speed.phase, -encoder_speed.power);
+	encoder_speed.power = abs(encoder_speed.power);
+	if(encoder_speed.power > 999){
+		encoder_speed.power = 999;
+	}else if(encoder_speed.power < 150){
+		encoder_speed.power = 150;
 	}
+	simplePWM(encoder_speed.phase, encoder_speed.power);
 
 	encoder_speed.pre.cnt = encoder_speed.now.cnt;
 	encoder_speed.pre.overflow = encoder_speed.now.overflow;
@@ -678,17 +682,36 @@ void finishSpeed(void){
 	speed_flag = false;
 }
 
-void initAngle(bool phase_, uint16_t rpm_, uint16_t angle_){
-	int32_t abs_angle = (__HAL_TIM_GET_COUNTER(&htim2) + overflow*65535) * 360 / (4*SPR);
+bool initAngle(bool phase_, uint16_t rpm_, uint16_t angle_){
+	int32_t abs_angle = ((int32_t)(__HAL_TIM_GET_COUNTER(&htim2) + overflow*65535) * (36 / 4) / (SPR / 10));
+	abs_angle = (abs_angle > 0) ? abs_angle : -abs_angle;
+	uint16_t target_angle = (uint16_t)((abs_angle - angle_ > 0) ? (abs_angle - angle_) : (angle_ - abs_angle));
 
-	abs_angle %= 180;
-	abs_angle += 360;
-
-	if(abs(angle_-abs_angle) <= 180){
-		initSpeed(phase_, rpm_, abs(angle_-abs_angle));
-	}else{
-		initSpeed(!phase_, rpm_, 360-abs(angle_-abs_angle));
+	if(rpm_ == 0){
+		return false;
 	}
+
+	if(target_angle == 0){
+		return false;
+	}
+
+	encoder_speed.phase = phase_;
+	encoder_speed.rpm = rpm_;
+	encoder_speed.end = target_angle;
+
+	encoder_speed.speed_pid.P_GAIN = 6;
+	encoder_speed.speed_pid.I_GAIN = 0.0001;
+	encoder_speed.speed_pid.D_GAIN = 0.01;
+
+	encoder_speed.end_pid.P_GAIN = 6;
+	encoder_speed.end_pid.I_GAIN = 0.0001;
+	encoder_speed.end_pid.D_GAIN = 0.01;
+
+	encoder_speed.mode = ANGLE;
+
+	startSpeed();
+
+	return true;
 }
 
 void stopAll(void){
@@ -701,7 +724,8 @@ void simplePWM(bool phase_, uint16_t power_){
 	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, power_);
 }
 
-void initLimit(bool phase_, uint16_t rpm_, bool port_){
+
+bool initLimit(bool phase_, uint16_t rpm_, bool port_){
 	limit_switch.phase = phase_;
 	limit_switch.port = port_;
 
@@ -711,9 +735,29 @@ void initLimit(bool phase_, uint16_t rpm_, bool port_){
 		HAL_NVIC_EnableIRQ(EXTI1_IRQn);
 	}
 
+	if(rpm_ == 0){
+		return false;
+	}
+
+	encoder_speed.phase = phase_;
+	encoder_speed.rpm = rpm_;
+	encoder_speed.end = 0u;
+
+	encoder_speed.speed_pid.P_GAIN = 6;
+	encoder_speed.speed_pid.I_GAIN = 0.0001;
+	encoder_speed.speed_pid.D_GAIN = 0.01;
+
+	encoder_speed.end_pid.P_GAIN = 6;
+	encoder_speed.end_pid.I_GAIN = 0.0001;
+	encoder_speed.end_pid.D_GAIN = 0.01;
+
+	encoder_speed.mode = LIM_SW;
+
 	limit_flag = true;
 
-	initSpeed(limit_switch.phase, rpm_, 0u);
+	startSpeed();
+
+	return true;
 }
 
 void finishLimit(void){
