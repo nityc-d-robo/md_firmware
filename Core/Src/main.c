@@ -131,12 +131,12 @@ void returnStatus(uint8_t master_id_, uint8_t semi_id_);
 bool startSpeed(void);
 bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_, uint16_t timeout_);
 bool rotateSpeed(void);
-void finishSpeed(void);
+void finishSpeed(FinishStatus finish_status_);
 
-bool initAngle(uint16_t rpm_, int32_t angle_);
+bool initAngle(uint16_t rpm_, int32_t angle_, uint16_t timeout_);
 
 bool initLimit(bool phase_, uint16_t rpm_, bool port_);
-void finishLimit(void);
+void finishLimit(FinishStatus finish_status_);
 
 void stopAll(void);
 void simplePWM(bool phase_, uint16_t power_);
@@ -558,6 +558,8 @@ bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_, uint16_t timeout_){
 	encoder.rpm = rpm_;
 	encoder.end = end_;
 
+	encoder.timeout = SPEED_RATE / 100 * timeout_ / 10;
+
 	encoder.speed_pid.P_GAIN = 6;
 	encoder.speed_pid.I_GAIN = 0.0001;
 	encoder.speed_pid.D_GAIN = 0.01;
@@ -612,7 +614,9 @@ bool startSpeed(void){
 	encoder.end_pid.diff = 0;
 	encoder.end_pid.integ = 0;
 
-	encoder.acc = 1000 * rpm_ / (max_rpm - max_rpm*general_torque/max_torque) / SPEED_RATE * 999 / TAU;
+	encoder.acc = (int32_t)((1000*rpm_/max_rpm) + (1000*general_torque/max_torque)) * 999 / SPEED_RATE / TAU;
+
+	encoder.count = 0u;
 
 	__HAL_TIM_CLEAR_FLAG(&htim16, TIM_FLAG_UPDATE);
 	HAL_TIM_Base_Start_IT(&htim16);
@@ -630,7 +634,16 @@ bool rotateSpeed(void){
 	if(abs((int)encoder.now.fusion_cnt) >= (int)encoder.end_cnt-5 && encoder.end != 0){
 		simplePWM(encoder.phase, 0);
 		encoder.power = 0;
-		finishSpeed();
+		finishSpeed(F_SUCCESS);
+		return false;
+	}else if(encoder.count > encoder.timeout && encoder.count != 0){
+		simplePWM(encoder.phase, 0);
+		encoder.power = 0;
+		if(encoder.mode == LIM_SW){
+			finishLimit(F_TIMEOUT);
+		}else{
+			finishSpeed(F_TIMEOUT);
+		}
 		return false;
 	}
 
@@ -643,6 +656,10 @@ bool rotateSpeed(void){
 
 	encoder.delta = encoder.speed_pid.P_GAIN*encoder.speed_pid.prop.buf[encoder.speed_pid.prop.now_point] + encoder.speed_pid.I_GAIN*encoder.speed_pid.integ/SPEED_RATE + encoder.speed_pid.D_GAIN*encoder.speed_pid.diff*SPEED_RATE;
 	encoder.power += encoder.delta;
+
+	if(encoder.speed_pid.prop.buf[encoder.speed_pid.prop.now_point] == 0){
+		general_torque = encoder.power * max_torque / 999 - (int32_t)encoder.rpm * max_torque / max_rpm;
+	}
 
 	if(encoder.end){
 		encoder.end_pid.prop.now_point = 1 - encoder.end_pid.prop.now_point;
@@ -664,10 +681,12 @@ bool rotateSpeed(void){
 
 	encoder.pre.fusion_cnt = encoder.now.fusion_cnt;
 
+	count++;
+
 	return true;
 }
 
-void finishSpeed(void){
+void finishSpeed(FinishStatus finish_status_){
 	HAL_TIM_Base_Stop_IT(&htim16);
 	free(encoder.speed_pid.prop.buf);
 	free(encoder.end_pid.prop.buf);
@@ -680,10 +699,12 @@ void finishSpeed(void){
 		angle_first = false;
 	}
 
+
+
 	speed_flag = false;
 }
 
-bool initAngle(uint16_t rpm_, int32_t angle_){
+bool initAngle(uint16_t rpm_, int32_t angle_, uint16_t timeout_){
 	int32_t now_angle = ((int32_t)(__HAL_TIM_GET_COUNTER(&htim2) * 360 / (4*SPR) + overflow*65535 / (4*SPR) * 360));
 	uint16_t target_angle = (uint16_t)abs(now_angle - angle_);
 
@@ -698,6 +719,8 @@ bool initAngle(uint16_t rpm_, int32_t angle_){
 	encoder.phase = (bool)((((now_angle - angle_ >= 0) ? 0 : 1) + angle_code) & 0x01);
 	encoder.rpm = rpm_;
 	encoder.end = target_angle;
+
+	encoder.timeout = SPEED_RATE / 100 * timeout_ / 10;
 
 	encoder.speed_pid.P_GAIN = 6;
 	encoder.speed_pid.I_GAIN = 0.0001;
@@ -726,7 +749,7 @@ void simplePWM(bool phase_, uint16_t power_){
 	encoder.power = (power_ < 1000) ? power_ : 999;
 }
 
-bool initLimit(bool phase_, uint16_t rpm_, bool port_){
+bool initLimit(bool phase_, uint16_t rpm_, bool port_, uint16_t timeout_){
 	limit_switch.phase = phase_;
 	limit_switch.port = port_;
 
@@ -743,6 +766,8 @@ bool initLimit(bool phase_, uint16_t rpm_, bool port_){
 	encoder_speed.phase = phase_;
 	encoder_speed.rpm = rpm_;
 	encoder_speed.end = 0u;
+
+	encoder.timeout = SPEED_RATE / 100 * timeout_ / 10;
 
 	encoder_speed.speed_pid.P_GAIN = 6;
 	encoder_speed.speed_pid.I_GAIN = 0.0001;
@@ -761,7 +786,7 @@ bool initLimit(bool phase_, uint16_t rpm_, bool port_){
 	return true;
 }
 
-void finishLimit(void){
+void finishLimit(FinishStatus finish_status_){
 	if(!limit_switch.port){
 		HAL_NVIC_DisableIRQ(EXTI0_IRQn);
 	}else{
@@ -770,9 +795,7 @@ void finishLimit(void){
 
 	limit_flag = false;
 
-	finishSpeed();
-
-	simplePWM(limit_switch.phase, 0u);
+	finishSpeed(finish_status_);
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_){
@@ -791,10 +814,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_){
 
 void HAL_GPIO_EXTI_Callback(uint16_t gpio_pin_){
 	if(gpio_pin_ == GPIO_PIN_0 && !limit_switch.port){
-		finishLimit();
-	}
-	if(gpio_pin_ == GPIO_PIN_1 && limit_switch.port){
-		finishLimit();
+		finishLimit(F_SUCCESS);
+	}else if(gpio_pin_ == GPIO_PIN_1 && limit_switch.port){
+		finishLimit(F_SUCCESS);
 	}
 }
 
