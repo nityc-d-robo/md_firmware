@@ -525,7 +525,7 @@ void initDriver(bool angle_reset_, uint16_t max_rpm_, uint16_t max_torque_, uint
 }
 
 void returnStatus(uint8_t master_id_, uint8_t semi_id_){
-	CAN_TxHeaderTypeDef TxHeader;
+	CAN_TxHeaderTypeDef tx_header;
 	uint32_t tx_mailbox;
 	uint8_t tx_datas[RETURN_SIZE];
 
@@ -533,20 +533,20 @@ void returnStatus(uint8_t master_id_, uint8_t semi_id_){
 
 	while(HAL_CAN_GetTxMailboxesFreeLevel(&hcan) <= 0);
 
-	TxHeader.StdId = semi_id_;
-	TxHeader.RTR = CAN_RTR_DATA;
-	TxHeader.IDE = CAN_ID_STD;
-	TxHeader.DLC = RETURN_SIZE;
-	TxHeader.TransmitGlobalTime = DISABLE;
+	tx_header.StdId = semi_id_;
+	tx_header.RTR = CAN_RTR_DATA;
+	tx_header.IDE = CAN_ID_STD;
+	tx_header.DLC = RETURN_SIZE;
+	tx_header.TransmitGlobalTime = DISABLE;
 	tx_datas[0] = id_own;
 	tx_datas[1] = master_id_;
 	tx_datas[2] = (uint8_t)F_STATUS;
-	tx_datas[3] = 30u;														//Ver2.0
+	tx_datas[3] = 30u;														//Ver3.0
 	tx_datas[4] = (uint8_t)((angle > 0) ? false : true);
 	tx_datas[5] = (uint8_t)((abs(angle) >> 8) & 0xff);
 	tx_datas[6] = (uint8_t)(abs(angle) & 0xff);
 	tx_datas[7] = !HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) << 1 | !HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1);
-	HAL_CAN_AddTxMessage(&hcan, &TxHeader, tx_datas, &tx_mailbox);
+	HAL_CAN_AddTxMessage(&hcan, &tx_header, tx_datas, &tx_mailbox);
 }
 
 bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_, uint16_t timeout_){
@@ -687,7 +687,7 @@ bool rotateSpeed(void){
 }
 
 void finishSpeed(FinishStatus finish_status_){
-	CAN_TxHeaderTypeDef TxHeader;
+	CAN_TxHeaderTypeDef tx_header;
 	uint32_t tx_mailbox;
 	uint8_t tx_datas[RETURN_SIZE];
 
@@ -705,16 +705,16 @@ void finishSpeed(FinishStatus finish_status_){
 
 	while(HAL_CAN_GetTxMailboxesFreeLevel(&hcan) <= 0);
 
-	TxHeader.StdId = semi_id;
-	TxHeader.RTR = CAN_RTR_DATA;
-	TxHeader.IDE = CAN_ID_STD;
-	TxHeader.DLC = RETURN_SIZE;
-	TxHeader.TransmitGlobalTime = DISABLE;
+	tx_header.StdId = semi_id;
+	tx_header.RTR = CAN_RTR_DATA;
+	tx_header.IDE = CAN_ID_STD;
+	tx_header.DLC = RETURN_SIZE;
+	tx_header.TransmitGlobalTime = DISABLE;
 	tx_datas[0] = id_own;
 	tx_datas[1] = master_id;
 	tx_datas[2] = (uint8_t)finish_status_;
 	tx_datas[3] = (uint8_t)encoder.mode;
-	HAL_CAN_AddTxMessage(&hcan, &TxHeader, tx_datas, &tx_mailbox);
+	HAL_CAN_AddTxMessage(&hcan, &tx_header, tx_datas, &tx_mailbox);
 
 	speed_flag = false;
 }
@@ -838,11 +838,11 @@ void HAL_GPIO_EXTI_Callback(uint16_t gpio_pin_){
 }
 
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
-	CAN_RxHeaderTypeDef RxHeader;
+	CAN_RxHeaderTypeDef rx_header;
 	uint32_t receive_id = 0u;
 	uint8_t rx_data[CAN_SIZE] = { 0u };
-	if (HAL_CAN_GetRxMessage(hcan_, CAN_RX_FIFO0, &RxHeader, rx_data) == HAL_OK){
-		receive_id = (RxHeader.IDE == CAN_ID_STD)? RxHeader.StdId : RxHeader.ExtId;
+	if (HAL_CAN_GetRxMessage(hcan_, CAN_RX_FIFO0, &rx_header, rx_data) == HAL_OK){
+		receive_id = (rx_header.IDE == CAN_ID_STD)? rx_header.StdId : rx_header.ExtId;
 		if(limit_flag){
 			finishLimit(F_INTERRUPT);
 		}else if(speed_flag){
