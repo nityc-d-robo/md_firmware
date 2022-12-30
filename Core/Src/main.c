@@ -135,7 +135,7 @@ void finishSpeed(FinishStatus finish_status_);
 
 bool initAngle(uint16_t rpm_, int32_t angle_, uint16_t timeout_);
 
-bool initLimit(bool phase_, uint16_t rpm_, bool port_);
+bool initLimit(bool phase_, uint16_t rpm_, bool port_, uint16_t timeout_);
 void finishLimit(FinishStatus finish_status_);
 
 void stopAll(void);
@@ -614,7 +614,7 @@ bool startSpeed(void){
 	encoder.end_pid.diff = 0;
 	encoder.end_pid.integ = 0;
 
-	encoder.acc = (int32_t)((1000*rpm_/max_rpm) + (1000*general_torque/max_torque)) * 999 / SPEED_RATE / TAU;
+	encoder.acc = (int32_t)((1000*encoder.rpm/max_rpm) + (1000*general_torque/max_torque)) * 999 / SPEED_RATE / TAU;
 
 	encoder.count = 0u;
 
@@ -636,7 +636,7 @@ bool rotateSpeed(void){
 		encoder.power = 0;
 		finishSpeed(F_SUCCESS);
 		return false;
-	}else if(encoder.count > encoder.timeout && encoder.count != 0){
+	}else if(encoder.count > encoder.timeout && encoder.timeout != 0){
 		simplePWM(encoder.phase, 0);
 		encoder.power = 0;
 		if(encoder.mode == LIM_SW){
@@ -681,12 +681,16 @@ bool rotateSpeed(void){
 
 	encoder.pre.fusion_cnt = encoder.now.fusion_cnt;
 
-	count++;
+	encoder.count++;
 
 	return true;
 }
 
 void finishSpeed(FinishStatus finish_status_){
+	CAN_TxHeaderTypeDef TxHeader;
+	uint32_t tx_mailbox;
+	uint8_t tx_datas[RETURN_SIZE];
+
 	HAL_TIM_Base_Stop_IT(&htim16);
 	free(encoder.speed_pid.prop.buf);
 	free(encoder.end_pid.prop.buf);
@@ -699,7 +703,18 @@ void finishSpeed(FinishStatus finish_status_){
 		angle_first = false;
 	}
 
+	while(HAL_CAN_GetTxMailboxesFreeLevel(&hcan) <= 0);
 
+	TxHeader.StdId = semi_id;
+	TxHeader.RTR = CAN_RTR_DATA;
+	TxHeader.IDE = CAN_ID_STD;
+	TxHeader.DLC = RETURN_SIZE;
+	TxHeader.TransmitGlobalTime = DISABLE;
+	tx_datas[0] = id_own;
+	tx_datas[1] = master_id;
+	tx_datas[2] = (uint8_t)finish_status_;
+	tx_datas[3] = (uint8_t)encoder.mode;
+	HAL_CAN_AddTxMessage(&hcan, &TxHeader, tx_datas, &tx_mailbox);
 
 	speed_flag = false;
 }
@@ -750,8 +765,8 @@ void simplePWM(bool phase_, uint16_t power_){
 }
 
 bool initLimit(bool phase_, uint16_t rpm_, bool port_, uint16_t timeout_){
-	limit_switch.phase = phase_;
-	limit_switch.port = port_;
+	limit_sw.phase = phase_;
+	limit_sw.port = port_;
 
 	if(!port_){
 		HAL_NVIC_EnableIRQ(EXTI0_IRQn);
@@ -763,21 +778,21 @@ bool initLimit(bool phase_, uint16_t rpm_, bool port_, uint16_t timeout_){
 		return false;
 	}
 
-	encoder_speed.phase = phase_;
-	encoder_speed.rpm = rpm_;
-	encoder_speed.end = 0u;
+	encoder.phase = phase_;
+	encoder.rpm = rpm_;
+	encoder.end = 0u;
 
 	encoder.timeout = SPEED_RATE / 100 * timeout_ / 10;
 
-	encoder_speed.speed_pid.P_GAIN = 6;
-	encoder_speed.speed_pid.I_GAIN = 0.0001;
-	encoder_speed.speed_pid.D_GAIN = 0.01;
+	encoder.speed_pid.P_GAIN = 6;
+	encoder.speed_pid.I_GAIN = 0.0001;
+	encoder.speed_pid.D_GAIN = 0.01;
 
-	encoder_speed.end_pid.P_GAIN = 6;
-	encoder_speed.end_pid.I_GAIN = 0.0001;
-	encoder_speed.end_pid.D_GAIN = 0.01;
+	encoder.end_pid.P_GAIN = 6;
+	encoder.end_pid.I_GAIN = 0.0001;
+	encoder.end_pid.D_GAIN = 0.01;
 
-	encoder_speed.mode = LIM_SW;
+	encoder.mode = LIM_SW;
 
 	limit_flag = true;
 
@@ -787,7 +802,7 @@ bool initLimit(bool phase_, uint16_t rpm_, bool port_, uint16_t timeout_){
 }
 
 void finishLimit(FinishStatus finish_status_){
-	if(!limit_switch.port){
+	if(!limit_sw.port){
 		HAL_NVIC_DisableIRQ(EXTI0_IRQn);
 	}else{
 		HAL_NVIC_DisableIRQ(EXTI1_IRQn);
@@ -813,9 +828,11 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_){
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t gpio_pin_){
-	if(gpio_pin_ == GPIO_PIN_0 && !limit_switch.port){
+	if(gpio_pin_ == GPIO_PIN_0 && !limit_sw.port){
+		simplePWM(encoder.phase, 0u);
 		finishLimit(F_SUCCESS);
-	}else if(gpio_pin_ == GPIO_PIN_1 && limit_switch.port){
+	}else if(gpio_pin_ == GPIO_PIN_1 && limit_sw.port){
+		simplePWM(encoder.phase, 0u);
 		finishLimit(F_SUCCESS);
 	}
 }
@@ -827,10 +844,14 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 	if (HAL_CAN_GetRxMessage(hcan_, CAN_RX_FIFO0, &RxHeader, rx_data) == HAL_OK){
 		receive_id = (RxHeader.IDE == CAN_ID_STD)? RxHeader.StdId : RxHeader.ExtId;
 		if(limit_flag){
-			finishLimit();
+			finishLimit(F_INTERRUPT);
 		}else if(speed_flag){
-			finishSpeed();
+			finishSpeed(F_INTERRUPT);
 		}
+
+		master_id = rx_data[0];
+		semi_id = rx_data[1];
+
 		if(receive_id == 0xf0){
 			stopAll();
 		}else{
@@ -849,15 +870,15 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 					break;
 				case SPEED:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-					initSpeed((bool)rx_data[1], (uint16_t)(rx_data[2]<<8 | rx_data[3]), (uint16_t)(rx_data[4]<<8 | rx_data[5]));
+					initSpeed((bool)rx_data[3], (uint16_t)(rx_data[4]<<8 | rx_data[5]), (uint16_t)(rx_data[6]<<8 | rx_data[7]), (uint16_t)(rx_data[8]<<8 | rx_data[9]));
 					break;
 				case ANGLE:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-					initAngle((bool)rx_data[1], (uint16_t)(rx_data[2]<<8 | rx_data[3]), (uint16_t)(rx_data[4]<<8 | rx_data[5]));
+					initAngle((uint16_t)(rx_data[4]<<8 | rx_data[5]), (int32_t)(rx_data[6]<<8 | rx_data[7])*(((rx_data[3]&0x01)==0) ? 1 : -1), (uint16_t)(rx_data[8]<<8 | rx_data[9]));
 					break;
 				case LIM_SW:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-					initLimit((bool)rx_data[1], (uint16_t)(rx_data[2]<<8 | rx_data[3]), (bool)(rx_data[4]));
+					initLimit((bool)rx_data[3], (uint16_t)(rx_data[4]<<8 | rx_data[5]), (bool)(rx_data[6]), (uint16_t)(rx_data[8]<<8 | rx_data[9]));
 					break;
 				default:
 					stopAll();
