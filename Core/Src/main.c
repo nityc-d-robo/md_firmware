@@ -45,7 +45,7 @@ typedef struct RingBuf{
 }RingBuf;
 
 typedef struct Encoder{
-	uint16_t cnt;
+	int32_t cnt;
 	int16_t overflow;
 	int64_t fusion_cnt;		//cnt + overflow * 65535
 }Encoder;
