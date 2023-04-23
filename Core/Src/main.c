@@ -67,8 +67,8 @@ typedef struct EncoderSpeed{
 	int32_t power;			//calculated from current rpm [pwm]
 	int32_t end_power;		//calculated from end count [pwm]
 
-	uint16_t count;
-	uint16_t timeout;
+	uint32_t count;
+	uint32_t timeout;
 	int32_t acc;			//accelaration
 	uint32_t now_speed;		//average speed[slit]
 	uint32_t target_speed;	//calculated from "rpm" [slit]
@@ -211,6 +211,7 @@ int main(void)
   __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
   overflow = 0;
+  encoder.power = 0u;
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -603,7 +604,6 @@ bool startSpeed(void){
 	encoder.now.cnt = 0u;
 	encoder.now.fusion_cnt = 0;
 
-	encoder.power = 0u;
 	encoder.target_speed = (uint32_t)((encoder.rpm*SPR*4)/(60*SPEED_RATE));
 	encoder.delta = 0u;
 	encoder.end_cnt = (uint32_t)((encoder.end*SPR*4)/360);
@@ -720,7 +720,7 @@ void finishSpeed(FinishStatus finish_status_){
 }
 
 bool initAngle(uint16_t rpm_, int32_t angle_, uint16_t timeout_){
-	int32_t now_angle = ((int32_t)(__HAL_TIM_GET_COUNTER(&htim2) * 360 / (4*SPR) + overflow*65535 / (4*SPR) * 360));
+	int32_t now_angle = ((int32_t)(__HAL_TIM_GET_COUNTER(&htim2) * (360 / 4) / SPR + overflow*65535 / 4 / SPR * 360));
 	uint16_t target_angle = (uint16_t)abs(now_angle - angle_);
 
 	if(rpm_ == 0){
