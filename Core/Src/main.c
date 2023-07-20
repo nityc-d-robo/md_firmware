@@ -1,6 +1,6 @@
 /* USER CODE BEGIN Header */
-//Ver 1.0.0 2021/08/08 k-trash
-//ver 1.0.0 complete
+//Ver 3.0.0 2022/12/23 k-trash
+//writing...
 /**
   ******************************************************************************
   * @file           : main.c
@@ -31,51 +31,73 @@
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 typedef enum Mode{
-	PWM, SPEED, LIM_SW
+	INIT, STATUS, PWM, SPEED, ANGLE, LIM_SW
 }Mode;
 
-typedef struct Encoder{
-	uint16_t cnt;
-	int16_t overflow;
-	uint64_t fusion_cnt;		//cnt + overflow * 65535
-}Encoder;
+typedef enum FinishStatus{
+	F_STATUS = 0, F_SUCCESS, F_TIMEOUT, F_INTERRUPT, F_OTHER
+}FinishStatus;
 
 typedef struct RingBuf{
 	uint8_t now_point;		//now point of ring buffer
 	uint8_t buf_num;			//amount of ring buffer
-	uint16_t *buf;
+	int32_t *buf;
 }RingBuf;
+
+typedef struct Encoder{
+	int32_t cnt;
+	int16_t overflow;
+	int64_t fusion_cnt;		//cnt + overflow * 65535
+}Encoder;
+
+typedef struct PID{
+	float P_GAIN;
+	float I_GAIN;
+	float D_GAIN;
+
+	RingBuf prop;
+	int32_t diff;
+	int32_t integ;
+}PID;
 
 typedef struct EncoderSpeed{
 	bool phase;
-	uint16_t rpm, end;
-	uint16_t pre_power;
-	int32_t power;
-	int32_t end_power;
-	float target_speed;
-	uint32_t now_speed;
-	uint32_t average_speed;
-	int32_t propotion;
-	uint32_t end_cnt;
-	RingBuf speeds;
-	Encoder first;		//初期状態
-	Encoder pre;			//前ループ時
-	Encoder now;			//現在
+	uint16_t rpm, end;		//Given first
+
+	int32_t power;			//calculated from current rpm [pwm]
+	int32_t end_power;		//calculated from end count [pwm]
+
+	uint32_t count;
+	uint32_t timeout;
+	int32_t acc;			//accelaration
+	uint32_t now_speed;		//average speed[slit]
+	uint32_t target_speed;	//calculated from "rpm" [slit]
+	int32_t delta;			//control amount
+	uint32_t end_cnt;		//calculated from "end" [slit]
+
+	Encoder first;			//first count status
+	Encoder pre;			//at previous loop
+	Encoder now;			//now count
+
+	PID speed_pid;
+	PID end_pid;
+
+	Mode mode;
 }EncoderSpeed;
 
 typedef struct LimitSwitch{
 	bool port;
 	bool phase;
-	uint16_t power;
 }LimitSwitch;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define SPR 48			//Slit Per Rotation
-#define SPEED_P 100
-#define END_P 20
-#define SPEED_RATE 200  //Hz
+#define SPR 250			//Slit Per Rotation
+#define SPEED_RATE 200  //control rate [Hz]
+#define CAN_SIZE 10		//CAN send data size[Byte]
+#define RETURN_SIZE 8	//CAN return data size[Byte]
+#define TAU 800			//Time constant of speed[ms]
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -102,12 +124,19 @@ static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM16_Init(void);
 /* USER CODE BEGIN PFP */
-bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_);
-bool rotateSpeed(void);
-void finishSpeed(void);
+void initDriver(bool angle_reset_ ,uint16_t max_rpm_, uint16_t max_torque_, uint16_t general_torque_);
 
-void initLimit(bool phase_, uint16_t power_, bool port_);
-void finishLimit(void);
+void returnStatus(uint8_t master_id_, uint8_t semi_id_);
+
+bool startSpeed(void);
+bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_, uint16_t timeout_);
+bool rotateSpeed(void);
+void finishSpeed(FinishStatus finish_status_);
+
+bool initAngle(uint16_t rpm_, int32_t angle_, uint16_t timeout_);
+
+bool initLimit(bool phase_, uint16_t rpm_, bool port_, uint16_t timeout_);
+void finishLimit(FinishStatus finish_status_);
 
 void stopAll(void);
 void simplePWM(bool phase_, uint16_t power_);
@@ -119,12 +148,23 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-volatile EncoderSpeed encoder_speed;
-volatile LimitSwitch limit_switch;
+volatile EncoderSpeed encoder;
+volatile LimitSwitch limit_sw;
+
+uint32_t id_own = 0u;							//CAN ID
 
 volatile int32_t overflow = 0;
 volatile bool speed_flag = false;
 volatile bool limit_flag = false;
+volatile bool angle_first = true;
+volatile uint8_t angle_code = 0u;
+
+volatile uint8_t master_id = 0x50;
+volatile uint8_t semi_id = 0x40;
+
+volatile uint16_t max_rpm = 20400u;				//maximum motor rpm[rpm]
+volatile uint16_t max_torque = 1523u;			//maximum torque[g.cm]
+volatile uint16_t general_torque = 0u;			//general torque[g.cm]
 /* USER CODE END 0 */
 
 /**
@@ -171,13 +211,13 @@ int main(void)
   __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
   overflow = 0;
+  encoder.power = 0u;
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  HAL_Delay(500);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -207,6 +247,7 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+
   /** Initializes the CPU, AHB and APB buses clocks
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
@@ -233,8 +274,7 @@ static void MX_CAN_Init(void)
   /* USER CODE BEGIN CAN_Init 0 */
 	CAN_FilterTypeDef filter;
 	uint32_t id_sw = 0u;
-	uint32_t id_all = 0x100 << 21;		//共通ID(非常停止用)
-	uint32_t id_own = 0u;				//基板のID
+	uint32_t id_all = 0xf0 << 21;		//common ID
   /* USER CODE END CAN_Init 0 */
 
   /* USER CODE BEGIN CAN_Init 1 */
@@ -466,45 +506,117 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
+void initDriver(bool angle_reset_, uint16_t max_rpm_, uint16_t max_torque_, uint16_t general_torque_){
+	if(max_rpm_ != 0u){
+		max_rpm = max_rpm_;
+	}
+
+	if(max_torque_ != 0u){
+		max_torque = max_torque_;
+	}
+
+	if(general_torque_ != 0u && max_torque > general_torque_){
+		general_torque = general_torque_;
+	}
+
+	if(angle_reset_){
+		overflow = 0;
+		__HAL_TIM_SET_COUNTER(&htim2, 0u);
+	}
+}
+
+void returnStatus(uint8_t master_id_, uint8_t semi_id_){
+	CAN_TxHeaderTypeDef tx_header;
+	uint32_t tx_mailbox;
+	uint8_t tx_datas[RETURN_SIZE];
+
+	int32_t angle = __HAL_TIM_GET_COUNTER(&htim2) * 360 / (4*SPR) + overflow * 65535 / (4*SPR) * 360;	//calculate encoder angle
+
+	while(HAL_CAN_GetTxMailboxesFreeLevel(&hcan) <= 0);
+
+	tx_header.StdId = semi_id_;
+	tx_header.RTR = CAN_RTR_DATA;
+	tx_header.IDE = CAN_ID_STD;
+	tx_header.DLC = RETURN_SIZE;
+	tx_header.TransmitGlobalTime = DISABLE;
+	tx_datas[0] = id_own;
+	tx_datas[1] = master_id_;
+	tx_datas[2] = (uint8_t)F_STATUS;
+	tx_datas[3] = 30u;														//Ver3.0
+	tx_datas[4] = (uint8_t)((angle > 0) ? false : true);
+	tx_datas[5] = (uint8_t)((abs(angle) >> 8) & 0xff);
+	tx_datas[6] = (uint8_t)(abs(angle) & 0xff);
+	tx_datas[7] = !HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) << 1 | !HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1);
+	HAL_CAN_AddTxMessage(&hcan, &tx_header, tx_datas, &tx_mailbox);
+}
+
+bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_, uint16_t timeout_){
 	if(rpm_ == 0){
 		return false;
 	}
 
-	encoder_speed.speeds.buf_num = 4u;
-	encoder_speed.speeds.now_point = 0u;
-	encoder_speed.speeds.buf = calloc(encoder_speed.speeds.buf_num, sizeof(uint16_t));
-	if(encoder_speed.speeds.buf == NULL){
+	encoder.phase = phase_;
+	encoder.rpm = rpm_;
+	encoder.end = end_;
+
+	encoder.timeout = SPEED_RATE / 100 * timeout_ / 10;
+
+	encoder.speed_pid.P_GAIN = 6;
+	encoder.speed_pid.I_GAIN = 0.0001;
+	encoder.speed_pid.D_GAIN = 0.01;
+
+	encoder.end_pid.P_GAIN = 6;
+	encoder.end_pid.I_GAIN = 0.0001;
+	encoder.end_pid.D_GAIN = 0.01;
+
+	encoder.mode = SPEED;
+
+	startSpeed();
+
+	return true;
+}
+
+bool startSpeed(void){
+	encoder.speed_pid.prop.buf_num = 2u;
+	encoder.speed_pid.prop.now_point = 0u;
+	encoder.speed_pid.prop.buf = calloc(encoder.speed_pid.prop.buf_num, sizeof(int32_t));
+	if(encoder.speed_pid.prop.buf == NULL){
 		stopAll();
 		return false;
 	}
 
-	encoder_speed.phase = phase_;
-	encoder_speed.rpm = rpm_;
-	encoder_speed.end = end_;
+	encoder.end_pid.prop.buf_num = 2u;
+	encoder.end_pid.prop.now_point = 0u;
+	encoder.end_pid.prop.buf = calloc(encoder.end_pid.prop.buf_num, sizeof(int32_t));
+	if(encoder.end_pid.prop.buf == NULL){
+		stopAll();
+		return false;
+	}
 
-	encoder_speed.first.overflow = 0;
-	encoder_speed.first.cnt = 0u;
-	encoder_speed.first.fusion_cnt = 0;
+	encoder.first.cnt = encoder.pre.cnt = __HAL_TIM_GET_COUNTER(&htim2);
+	encoder.first.overflow = overflow;
+	encoder.first.fusion_cnt = 0;
 
-	encoder_speed.pre.overflow = 0;
-	encoder_speed.pre.cnt = 0u;
-	encoder_speed.pre.fusion_cnt = 0;
+	encoder.pre.overflow = 0;
+	encoder.pre.fusion_cnt = encoder.pre.cnt;
 
-	encoder_speed.now.overflow = 0;
-	encoder_speed.now.cnt = 0u;
-	encoder_speed.now.fusion_cnt = 0;
+	encoder.now.overflow = 0;
+	encoder.now.cnt = 0u;
+	encoder.now.fusion_cnt = 0;
 
-	encoder_speed.first.cnt = encoder_speed.pre.cnt = TIM2 -> CNT;
-	encoder_speed.first.overflow = encoder_speed.pre.overflow = overflow;
+	encoder.target_speed = (uint32_t)((encoder.rpm*SPR*4)/(60*SPEED_RATE));
+	encoder.delta = 0u;
+	encoder.end_cnt = (uint32_t)((encoder.end*SPR*4)/360);
 
-	encoder_speed.power = 0u;
-	encoder_speed.pre_power = 0u;
-	encoder_speed.target_speed = (float)((rpm_*SPR*4)/(60*SPEED_RATE));
-	encoder_speed.now_speed = 0u;
-	encoder_speed.average_speed = 0u;
-	encoder_speed.propotion = 0u;
-	encoder_speed.end_cnt = (uint32_t)((end_*SPR*4)/360);
+	encoder.speed_pid.diff = 0;
+	encoder.speed_pid.integ = 0;
+
+	encoder.end_pid.diff = 0;
+	encoder.end_pid.integ = 0;
+
+	encoder.acc = (int32_t)((1000*encoder.rpm/max_rpm) + (1000*general_torque/max_torque)) * 999 / SPEED_RATE / TAU;
+
+	encoder.count = 0u;
 
 	__HAL_TIM_CLEAR_FLAG(&htim16, TIM_FLAG_UPDATE);
 	HAL_TIM_Base_Start_IT(&htim16);
@@ -515,68 +627,146 @@ bool initSpeed(bool phase_, uint16_t rpm_, uint16_t end_){
 }
 
 bool rotateSpeed(void){
-	encoder_speed.now.cnt = TIM2 -> CNT;
-	encoder_speed.now.overflow = overflow - encoder_speed.first.overflow;
-	encoder_speed.now.fusion_cnt = encoder_speed.now.cnt + encoder_speed.now.overflow * 65535;
+	encoder.now.cnt = __HAL_TIM_GET_COUNTER(&htim2) - encoder.first.cnt;
+	encoder.now.overflow = overflow - encoder.first.overflow;
+	encoder.now.fusion_cnt = encoder.now.cnt + encoder.now.overflow * 65535;
 
-	if(abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.first.cnt)) >= encoder_speed.end_cnt-5){				//将来的にPD制御に
-		finishSpeed();
+	if(abs((int)encoder.now.fusion_cnt) >= (int)encoder.end_cnt-5 && encoder.end != 0){
+		simplePWM(encoder.phase, 0);
+		encoder.power = 0;
+		finishSpeed(F_SUCCESS);
+		return false;
+	}else if(encoder.count > encoder.timeout && encoder.timeout != 0){
+		simplePWM(encoder.phase, 0);
+		encoder.power = 0;
+		if(encoder.mode == LIM_SW){
+			finishLimit(F_TIMEOUT);
+		}else{
+			finishSpeed(F_TIMEOUT);
+		}
 		return false;
 	}
 
-	encoder_speed.now_speed = abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.pre.fusion_cnt));
-	encoder_speed.speeds.buf[(encoder_speed.speeds.now_point)++] = encoder_speed.now_speed;
-	if(encoder_speed.speeds.now_point >= encoder_speed.speeds.buf_num){
-		encoder_speed.speeds.now_point = 0;
-	}
-	encoder_speed.average_speed = (encoder_speed.speeds.buf[0] + encoder_speed.speeds.buf[1] + encoder_speed.speeds.buf[2] + encoder_speed.speeds.buf[3]) / 4;
+	encoder.now_speed = abs((int)(encoder.now.fusion_cnt - encoder.pre.fusion_cnt));
 
-	encoder_speed.propotion = ((encoder_speed.target_speed - encoder_speed.average_speed) / encoder_speed.target_speed) * SPEED_P;
-	encoder_speed.power = (int32_t)(encoder_speed.pre_power + encoder_speed.propotion);
+	encoder.speed_pid.prop.now_point = 1 - encoder.speed_pid.prop.now_point;
+	encoder.speed_pid.prop.buf[encoder.speed_pid.prop.now_point] = encoder.target_speed - encoder.now_speed;
+	encoder.speed_pid.integ += encoder.speed_pid.prop.buf[encoder.speed_pid.prop.now_point];
+	encoder.speed_pid.diff = encoder.speed_pid.prop.buf[encoder.speed_pid.prop.now_point] - encoder.speed_pid.prop.buf[1-encoder.speed_pid.prop.now_point];
 
-	encoder_speed.end_power = END_P * (encoder_speed.end_cnt - abs((int32_t)(encoder_speed.now.fusion_cnt - encoder_speed.first.cnt)));
+	encoder.delta = encoder.speed_pid.P_GAIN*encoder.speed_pid.prop.buf[encoder.speed_pid.prop.now_point] + encoder.speed_pid.I_GAIN*encoder.speed_pid.integ/SPEED_RATE + encoder.speed_pid.D_GAIN*encoder.speed_pid.diff*SPEED_RATE;
+	encoder.power += encoder.delta;
 
-	if(encoder_speed.power > encoder_speed.end_power){
-		encoder_speed.power = encoder_speed.end_power;
+	if(encoder.speed_pid.prop.buf[encoder.speed_pid.prop.now_point] == 0){
+		general_torque = encoder.power * max_torque / 999 - (int32_t)encoder.rpm * max_torque / max_rpm;
 	}
 
-	if(encoder_speed.power > 999){
-		encoder_speed.power = 999;
-	}
-	if((encoder_speed.power < 400) || (encoder_speed.now.fusion_cnt == encoder_speed.first.cnt)){
-		encoder_speed.power = 400;
+	if(encoder.end){
+		encoder.end_pid.prop.now_point = 1 - encoder.end_pid.prop.now_point;
+		encoder.end_pid.prop.buf[encoder.end_pid.prop.now_point] = encoder.end_cnt - abs((int)encoder.now.fusion_cnt);
+		encoder.end_pid.integ += encoder.end_pid.prop.buf[encoder.speed_pid.prop.now_point];
+		encoder.end_pid.diff = encoder.end_pid.prop.buf[encoder.end_pid.prop.now_point] - encoder.end_pid.prop.buf[1-encoder.end_pid.prop.now_point];
+		encoder.end_power = encoder.end_pid.P_GAIN*encoder.end_pid.prop.buf[encoder.end_pid.prop.now_point] + encoder.end_pid.I_GAIN*encoder.end_pid.integ/SPEED_RATE + encoder.end_pid.D_GAIN*encoder.end_pid.diff*SPEED_RATE;
+
+		if(encoder.power > encoder.end_power){
+			encoder.power = encoder.end_power;
+		}
 	}
 
-	simplePWM(encoder_speed.phase, encoder_speed.power);
-	encoder_speed.pre.cnt = encoder_speed.now.cnt;
-	encoder_speed.pre.overflow = encoder_speed.now.overflow;
-	encoder_speed.pre.fusion_cnt = encoder_speed.now.fusion_cnt;
-	encoder_speed.pre_power = encoder_speed.power;
+	if(encoder.now.fusion_cnt == encoder.first.cnt){
+		encoder.power += encoder.acc;
+	}
+
+	simplePWM(encoder.phase, (uint16_t)encoder.power);
+
+	encoder.pre.fusion_cnt = encoder.now.fusion_cnt;
+
+	encoder.count++;
 
 	return true;
 }
 
-void finishSpeed(void){
-	simplePWM(encoder_speed.phase, 0);
+void finishSpeed(FinishStatus finish_status_){
+	CAN_TxHeaderTypeDef tx_header;
+	uint32_t tx_mailbox;
+	uint8_t tx_datas[RETURN_SIZE];
+
 	HAL_TIM_Base_Stop_IT(&htim16);
-	free(encoder_speed.speeds.buf);
+	free(encoder.speed_pid.prop.buf);
+	free(encoder.end_pid.prop.buf);
+
+	if(angle_first){
+		bool code_tmp = (encoder.now.fusion_cnt >= 0) ? 0 : 1;
+
+		angle_code = (encoder.phase == code_tmp) ? 0 : 1;
+
+		angle_first = false;
+	}
+
+	while(HAL_CAN_GetTxMailboxesFreeLevel(&hcan) <= 0);
+
+	tx_header.StdId = semi_id;
+	tx_header.RTR = CAN_RTR_DATA;
+	tx_header.IDE = CAN_ID_STD;
+	tx_header.DLC = RETURN_SIZE;
+	tx_header.TransmitGlobalTime = DISABLE;
+	tx_datas[0] = id_own;
+	tx_datas[1] = master_id;
+	tx_datas[2] = (uint8_t)finish_status_;
+	tx_datas[3] = (uint8_t)encoder.mode;
+	HAL_CAN_AddTxMessage(&hcan, &tx_header, tx_datas, &tx_mailbox);
+
 	speed_flag = false;
+}
+
+bool initAngle(uint16_t rpm_, int32_t angle_, uint16_t timeout_){
+	int32_t now_angle = ((int32_t)(__HAL_TIM_GET_COUNTER(&htim2) * (360 / 4) / SPR + overflow*65535 / 4 / SPR * 360));
+	uint16_t target_angle = (uint16_t)abs(now_angle - angle_);
+
+	if(rpm_ == 0){
+		return false;
+	}
+
+	if(target_angle == 0){
+		return false;
+	}
+
+	encoder.phase = (bool)((((now_angle - angle_ >= 0) ? 0 : 1) + angle_code) & 0x01);
+	encoder.rpm = rpm_;
+	encoder.end = target_angle;
+
+	encoder.timeout = SPEED_RATE / 100 * timeout_ / 10;
+
+	encoder.speed_pid.P_GAIN = 6;
+	encoder.speed_pid.I_GAIN = 0.0001;
+	encoder.speed_pid.D_GAIN = 0.01;
+
+	encoder.end_pid.P_GAIN = 6;
+	encoder.end_pid.I_GAIN = 0.0001;
+	encoder.end_pid.D_GAIN = 0.01;
+
+	encoder.mode = ANGLE;
+
+	startSpeed();
+
+	return true;
 }
 
 void stopAll(void){
 	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
 	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
+	encoder.power = 0;
 }
 
 void simplePWM(bool phase_, uint16_t power_){
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, (GPIO_PinState)phase_);
-	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, power_);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, (power_ < 1000) ? power_ : 999);
+	encoder.power = (power_ < 1000) ? power_ : 999;
 }
 
-void initLimit(bool phase_, uint16_t power_, bool port_){
-	limit_switch.phase = phase_;
-	limit_switch.power = power_;
-	limit_switch.port = port_;
+bool initLimit(bool phase_, uint16_t rpm_, bool port_, uint16_t timeout_){
+	limit_sw.phase = phase_;
+	limit_sw.port = port_;
 
 	if(!port_){
 		HAL_NVIC_EnableIRQ(EXTI0_IRQn);
@@ -584,15 +774,35 @@ void initLimit(bool phase_, uint16_t power_, bool port_){
 		HAL_NVIC_EnableIRQ(EXTI1_IRQn);
 	}
 
+	if(rpm_ == 0){
+		return false;
+	}
+
+	encoder.phase = phase_;
+	encoder.rpm = rpm_;
+	encoder.end = 0u;
+
+	encoder.timeout = SPEED_RATE / 100 * timeout_ / 10;
+
+	encoder.speed_pid.P_GAIN = 6;
+	encoder.speed_pid.I_GAIN = 0.0001;
+	encoder.speed_pid.D_GAIN = 0.01;
+
+	encoder.end_pid.P_GAIN = 6;
+	encoder.end_pid.I_GAIN = 0.0001;
+	encoder.end_pid.D_GAIN = 0.01;
+
+	encoder.mode = LIM_SW;
+
 	limit_flag = true;
 
-	simplePWM(phase_, power_);
+	startSpeed();
 
-	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+	return true;
 }
 
-void finishLimit(void){
-	if(!limit_switch.port){
+void finishLimit(FinishStatus finish_status_){
+	if(!limit_sw.port){
 		HAL_NVIC_DisableIRQ(EXTI0_IRQn);
 	}else{
 		HAL_NVIC_DisableIRQ(EXTI1_IRQn);
@@ -600,7 +810,7 @@ void finishLimit(void){
 
 	limit_flag = false;
 
-	simplePWM(limit_switch.phase, 0u);
+	finishSpeed(finish_status_);
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_){
@@ -618,40 +828,57 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_){
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t gpio_pin_){
-	if(gpio_pin_ == GPIO_PIN_0 && !limit_switch.port){
-		finishLimit();
-	}
-	if(gpio_pin_ == GPIO_PIN_1 && limit_switch.port){
-		finishLimit();
+	if(gpio_pin_ == GPIO_PIN_0 && !limit_sw.port){
+		simplePWM(encoder.phase, 0u);
+		finishLimit(F_SUCCESS);
+	}else if(gpio_pin_ == GPIO_PIN_1 && limit_sw.port){
+		simplePWM(encoder.phase, 0u);
+		finishLimit(F_SUCCESS);
 	}
 }
 
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
-	CAN_RxHeaderTypeDef RxHeader;
+	CAN_RxHeaderTypeDef rx_header;
 	uint32_t receive_id = 0u;
-	uint8_t rx_data[6] = { 0u };
-	if (HAL_CAN_GetRxMessage(hcan_, CAN_RX_FIFO0, &RxHeader, rx_data) == HAL_OK){
-		receive_id = (RxHeader.IDE == CAN_ID_STD)? RxHeader.StdId : RxHeader.ExtId;
-		if(speed_flag){
-			finishSpeed();
-		}else if(limit_flag){
-			finishLimit();
+	uint8_t rx_data[CAN_SIZE] = { 0u };
+	if (HAL_CAN_GetRxMessage(hcan_, CAN_RX_FIFO0, &rx_header, rx_data) == HAL_OK){
+		receive_id = (rx_header.IDE == CAN_ID_STD)? rx_header.StdId : rx_header.ExtId;
+		if(limit_flag){
+			finishLimit(F_INTERRUPT);
+		}else if(speed_flag){
+			finishSpeed(F_INTERRUPT);
 		}
-		if(receive_id == 0x100){
+
+		master_id = rx_data[0];
+		semi_id = rx_data[1];
+
+		if(receive_id == 0xf0){
 			stopAll();
 		}else{
-			switch(rx_data[0]){
+			switch(rx_data[2]){
+				case INIT:
+					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
+					initDriver((bool)rx_data[3], (uint16_t)(rx_data[4]<<8 | rx_data[5]), (uint16_t)(rx_data[6]<<8 | rx_data[7]), (uint16_t)(rx_data[8]<<8 | rx_data[9]));
+					break;
+				case STATUS:
+					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
+					returnStatus(rx_data[0], rx_data[1]);
+					break;
 				case PWM:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-					simplePWM((bool)rx_data[1], ((uint16_t)(rx_data[2])<<8 | rx_data[3]));
+					simplePWM((bool)rx_data[3], (uint16_t)(rx_data[4]<<8 | rx_data[5]));
 					break;
 				case SPEED:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-					initSpeed((bool)rx_data[1], ((uint16_t)(rx_data[2]<<8 | rx_data[3])), ((uint16_t)(rx_data[4]<<8 | rx_data[5])));
+					initSpeed((bool)rx_data[3], (uint16_t)(rx_data[4]<<8 | rx_data[5]), (uint16_t)(rx_data[6]<<8 | rx_data[7]), (uint16_t)(rx_data[8]<<8 | rx_data[9]));
+					break;
+				case ANGLE:
+					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
+					initAngle((uint16_t)(rx_data[4]<<8 | rx_data[5]), (int32_t)(rx_data[6]<<8 | rx_data[7])*(((rx_data[3]&0x01)==0) ? 1 : -1), (uint16_t)(rx_data[8]<<8 | rx_data[9]));
 					break;
 				case LIM_SW:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-					initLimit((bool)rx_data[1], ((uint16_t)(rx_data[2]<<8 | rx_data[3])), (bool)(rx_data[4]));
+					initLimit((bool)rx_data[3], (uint16_t)(rx_data[4]<<8 | rx_data[5]), (bool)(rx_data[6]), (uint16_t)(rx_data[8]<<8 | rx_data[9]));
 					break;
 				default:
 					stopAll();
@@ -673,6 +900,8 @@ void Error_Handler(void)
   __disable_irq();
   while (1)
   {
+	  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+	  HAL_Delay(500);
   }
   /* USER CODE END Error_Handler_Debug */
 }
@@ -693,5 +922,3 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
