@@ -1,2 +1,5 @@
-/Debug/
-/md_1_0 デバッグ.launch
+Debug/
+Release/
+.settings/
+.mxproject
+*.launch
