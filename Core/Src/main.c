@@ -463,7 +463,7 @@ void simplePWM(int16_t power_){
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, (GPIO_PinState)phase);
 	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, (abs(power_) < 1000) ? abs(power_) : 999);
 }
-void rotateSpeed(int16_t target_count) {
+void rotateSpeed(int16_t target_count) {  
   if(pid.i > 16384) {
     pid.i = 0;
     pid.target_count-=10;
@@ -531,6 +531,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
     }
 }
 void HAL_GPIO_EXTI_Callback(uint16_t gpio_pin_){
+  if(mode != LIM_SW) return;
 	if(gpio_pin_ == SW0_Pin && !lim_sw.port){
 		simplePWM(lim_sw.after_power);
     HAL_NVIC_DisableIRQ(EXTI0_IRQn);
@@ -554,7 +555,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 			stopAll();
 		} else if(receive_id == id_own >> 21){
 			switch(rx_data[2]){
-case INIT:
+        case INIT:
           break;
         case STATUS:
           break;
@@ -564,14 +565,14 @@ case INIT:
 					simplePWM((int16_t)(rx_data[4]<<8 | rx_data[5]));
 					break;
 				case SPEED:
-          					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
+					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
           int16_t target_count = (int16_t)(rx_data[4]<<8 | rx_data[5]);
-if(target_count == 0){
+          if(target_count == 0){
             simplePWM(0);
           }else {
             pid.target_count = target_count;
-					rotateSpeed(pid.target_count);
-mode = SPEED;
+					  rotateSpeed(pid.target_count);
+            mode = SPEED;
           }
 					break;
 				case LIM_SW:
@@ -589,6 +590,7 @@ mode = SPEED;
             }
             HAL_NVIC_EnableIRQ(EXTI1_IRQn);
           }
+          mode = LIM_SW;
           simplePWM((int16_t)(rx_data[4]<<8 | rx_data[5]));
           break;
 				default:
