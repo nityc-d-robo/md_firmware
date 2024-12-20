@@ -486,6 +486,8 @@ void returnStatus(uint8_t master_id_){
 
 	int64_t angle = encoder.fusion_cnt % CPR;	//calculate encoder angle
   delta_count = encoder.fusion_cnt - pre_encoder.fusion_cnt;
+  double rps = (double)delta_count / CPR * SPEED_RATE;
+  int_16_t rpm = (int16_t)(rps * 60);
 
 	while(HAL_CAN_GetTxMailboxesFreeLevel(&hcan) <= 0);
 
@@ -496,8 +498,8 @@ void returnStatus(uint8_t master_id_){
 	tx_header.TransmitGlobalTime = DISABLE;
 	tx_datas[0] = (uint8_t)((angle >> 8) & 0xff);
 	tx_datas[1] = (uint8_t)(angle & 0xff);
-	tx_datas[2] = (uint8_t)((delta_count >> 8) & 0xff);
-	tx_datas[3] = (uint8_t)(delta_count & 0xff);
+	tx_datas[2] = (uint8_t)((rpm >> 8) & 0xff);
+	tx_datas[3] = (uint8_t)(rpm & 0xff);
 	tx_datas[4] = (uint8_t)(!HAL_GPIO_ReadPin(SW0_GPIO_Port, SW0_Pin));
 	tx_datas[5] = (uint8_t)(!HAL_GPIO_ReadPin(SW1_GPIO_Port, SW1_Pin));
 	tx_datas[6] = (uint8_t)((id_own >> 21) & 0xff);
