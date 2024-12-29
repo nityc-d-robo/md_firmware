@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdbool.h>
+#include <stdlib.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -487,7 +488,7 @@ void returnStatus(uint8_t master_id_){
 	int64_t angle = encoder.fusion_cnt % CPR;	//calculate encoder angle
   delta_count = encoder.fusion_cnt - pre_encoder.fusion_cnt;
   double rps = (double)delta_count / CPR * SPEED_RATE;
-  int_16_t rpm = (int16_t)(rps * 60);
+  int16_t rpm = (int16_t)(rps * 60);
 
 	while(HAL_CAN_GetTxMailboxesFreeLevel(&hcan) <= 0);
 
