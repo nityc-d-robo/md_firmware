@@ -55,7 +55,7 @@ typedef struct {
 #define SPEED_RATE 200  //control rate [Hz]
 #define CAN_SIZE 8		//CAN send data size[Byte]
 #define RETURN_SIZE 8	//CAN return data size[Byte]
-#define ENCODER_COUNTERPERIOD 8192-1
+#define ENCODER_COUNTERPERIOD 4294967295
 
 #define Kp 1
 #define Ki 1
@@ -285,7 +285,7 @@ static void MX_TIM2_Init(void)
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 0;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 8192-1;
+  htim2.Init.Period = 4294967295;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   sConfig.EncoderMode = TIM_ENCODERMODE_TI12;
@@ -530,7 +530,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
       encoder.cnt = __HAL_TIM_GET_COUNTER(&htim2);
       encoder.fusion_cnt = encoder.cnt + encoder.overflow*ENCODER_COUNTERPERIOD;
       delta_count = encoder.fusion_cnt - pre_encoder.fusion_cnt;
-      // returnStatus(0x60);
+      returnStatus(0x60);
     }
 }
 void HAL_GPIO_EXTI_Callback(uint16_t gpio_pin_){
