@@ -41,11 +41,12 @@ typedef struct {
   int after_power;
 } LimitSwitch;
 typedef struct {
-  int16_t target_count;
-  int64_t p;
-  int64_t pre_p;
-  int64_t i;
-  int64_t d;
+  int16_t target_rpm;
+  int32_t p;
+  int32_t pre_error;
+  int32_t i;
+  int32_t d;
+  int16_t error;
 } PidController ;
 /* USER CODE END PTD */
 
@@ -57,9 +58,6 @@ typedef struct {
 #define RETURN_SIZE 8	//CAN return data size[Byte]
 #define ENCODER_COUNTERPERIOD 4294967295
 
-#define Kp 1
-#define Ki 1
-#define Kd 1
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -81,12 +79,17 @@ Encoder encoder = {0};
 PidController pid = {0};
 LimitSwitch lim_sw = {0};
 
-int16_t delta_count = 0;
+int16_t delta_rpm = 0;
 
 uint32_t id_own = 0u;
 
 // livewatch
 int16_t power = 0;
+
+// PID constant
+int16_t Kp = 1;
+int16_t Ki = 1;
+int16_t Kd = 1;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -99,7 +102,7 @@ static void MX_TIM16_Init(void);
 /* USER CODE BEGIN PFP */
 void stopAll(void);
 void simplePWM(int16_t power_);
-void rotateSpeed(int16_t target_count);
+void rotateSpeed(int16_t target_rpm);
 void returnStatus(uint8_t master_id_);
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim_);
@@ -464,18 +467,21 @@ void simplePWM(int16_t power_){
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, (GPIO_PinState)phase);
 	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, (abs(power_) < 1000) ? abs(power_) : 999);
 }
-void rotateSpeed(int16_t target_count) {  
-  if(pid.i > 16384) {
-    pid.i = 0;
-    pid.target_count-=10;
-  } else if(pid.i < -16384) {
-    pid.i = 0;
-    pid.target_count+=10;
+void rotateSpeed(int16_t target_rpm) {
+  pre_encoder = encoder;
+  encoder.cnt = __HAL_TIM_GET_COUNTER(&htim2);
+  encoder.fusion_cnt = encoder.cnt + encoder.overflow*ENCODER_COUNTERPERIOD;
+  delta_rpm = (encoder.fusion_cnt - pre_encoder.fusion_cnt) * 60 / CPR * SPEED_RATE;
+  if(pid.i > 999) {
+    pid.i = 999;
+  } else if(pid.i < -999) {
+    pid.i = -999;
   }
-  pid.pre_p = pid.p;
-  pid.p = Kp * (target_count - delta_count);
-  pid.i += Ki * pid.p;
-  pid.d = Kd * (pid.p - pid.pre_p) / 0.1;
+  pid.pre_error = pid.error;
+  pid.error = target_rpm - delta_rpm;
+  pid.p = Kp * pid.error;
+  pid.i += Ki * pid.error;
+  pid.d = Kd * (pid.error - pid.pre_error) / 0.005;
   power = pid.p + pid.i + pid.d;
   simplePWM(power);
 }
@@ -486,9 +492,7 @@ void returnStatus(uint8_t master_id_){
 	uint8_t tx_datas[RETURN_SIZE];
 
 	int64_t angle = encoder.fusion_cnt % CPR;	//calculate encoder angle
-  delta_count = encoder.fusion_cnt - pre_encoder.fusion_cnt;
-  double rps = (double)delta_count / CPR * SPEED_RATE;
-  int16_t rpm = (int16_t)(rps * 60);
+  int16_t rpm = (encoder.fusion_cnt - pre_encoder.fusion_cnt) * 60 / CPR * SPEED_RATE;
 
 	while(HAL_CAN_GetTxMailboxesFreeLevel(&hcan) <= 0);
 
@@ -523,13 +527,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
           HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
           break;
         case SPEED:
-          rotateSpeed(pid.target_count);
+          rotateSpeed(pid.target_rpm);
           break;
       }
-      pre_encoder = encoder;
-      encoder.cnt = __HAL_TIM_GET_COUNTER(&htim2);
-      encoder.fusion_cnt = encoder.cnt + encoder.overflow*ENCODER_COUNTERPERIOD;
-      delta_count = encoder.fusion_cnt - pre_encoder.fusion_cnt;
       returnStatus(0x60);
     }
 }
@@ -569,12 +569,12 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 					break;
 				case SPEED:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-          int16_t target_count = (int16_t)(rx_data[4]<<8 | rx_data[5]);
-          if(target_count == 0){
+          int16_t target_rpm = (int16_t)(rx_data[4]<<8 | rx_data[5]);
+          if(target_rpm == 0){
             simplePWM(0);
           }else {
-            pid.target_count = target_count;
-					  rotateSpeed(pid.target_count);
+            pid.target_rpm = target_rpm;
+					  rotateSpeed(pid.target_rpm);
             mode = SPEED;
           }
 					break;
