@@ -534,10 +534,12 @@ void HAL_GPIO_EXTI_Callback(uint16_t gpio_pin_){
   if(mode != LIM_SW) return;
 	if(gpio_pin_ == SW0_Pin && !lim_sw.port){
 		simplePWM(lim_sw.after_power);
+    mode = INIT;
     HAL_NVIC_DisableIRQ(EXTI0_IRQn);
-	}else if(gpio_pin_ == SW1_Pin && lim_sw.port){
+	} else if(gpio_pin_ == SW1_Pin && lim_sw.port){
 		simplePWM(lim_sw.after_power);
-    HAL_NVIC_DisableIRQ(EXTI0_IRQn);
+    mode = INIT;
+    HAL_NVIC_DisableIRQ(EXTI1_IRQn);
 	}
 }
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
@@ -581,13 +583,17 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
           lim_sw.after_power = (int16_t)(rx_data[6]<<8 | rx_data[7]);
           if(lim_sw.port == 0) {
             if (HAL_GPIO_ReadPin(SW0_GPIO_Port, SW0_Pin)) {
+              simplePWM(lim_sw.after_power);
               break;  
             }
+            __HAL_GPIO_EXTI_CLEAR_FLAG(SW0_Pin);
             HAL_NVIC_EnableIRQ(EXTI0_IRQn);
           } else {
             if (HAL_GPIO_ReadPin(SW1_GPIO_Port, SW1_Pin)){
+              simplePWM(lim_sw.after_power);
               break;
             }
+            __HAL_GPIO_EXTI_CLEAR_FLAG(SW1_Pin);    
             HAL_NVIC_EnableIRQ(EXTI1_IRQn);
           }
           mode = LIM_SW;
