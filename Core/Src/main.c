@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdbool.h>
+#include <stdlib.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -218,7 +219,7 @@ static void MX_CAN_Init(void)
 
   /* USER CODE BEGIN CAN_Init 0 */
   CAN_FilterTypeDef filter;
-  uint32_t id_sw;
+  uint32_t id_sw = 0;
   uint32_t id_all = 0xf0 << 21;
   /* USER CODE END CAN_Init 0 */
 
@@ -248,14 +249,14 @@ static void MX_CAN_Init(void)
   id_sw += (uint32_t)(!HAL_GPIO_ReadPin(MODE0_GPIO_Port, MODE0_Pin));
 
   id_own = id_sw << 21;
-  filter.FilterIdHigh = 0;
-  filter.FilterIdLow = 0;
-  filter.FilterMaskIdHigh = 0;
-  filter.FilterMaskIdLow = 0;
+  filter.FilterIdHigh = id_all >> 16;
+  filter.FilterIdLow = id_all;
+  filter.FilterMaskIdHigh = id_own >> 16;
+  filter.FilterMaskIdLow = id_own;
   filter.FilterScale = CAN_FILTERSCALE_32BIT;
   filter.FilterFIFOAssignment = CAN_FILTER_FIFO0;
   filter.FilterBank = 0;
-  filter.FilterMode = CAN_FILTERMODE_IDMASK;
+  filter.FilterMode = CAN_FILTERMODE_IDLIST;
   filter.SlaveStartFilterBank = 14;
   filter.FilterActivation = ENABLE;
   HAL_CAN_ConfigFilter(&hcan, &filter);
@@ -522,6 +523,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
         case SPEED:
           rotateSpeed(pid.target_count);
           break;
+        default:
+          break;
       }
       pre_encoder = encoder;
       encoder.cnt = __HAL_TIM_GET_COUNTER(&htim2);
@@ -548,10 +551,12 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 	uint8_t rx_data[CAN_SIZE] = { 0u };
 	if (HAL_CAN_GetRxMessage(hcan_, CAN_RX_FIFO0, &rx_header, rx_data) == HAL_OK){
 		receive_id = (rx_header.IDE == CAN_ID_STD)? rx_header.StdId : rx_header.ExtId;
-		mode == INIT;
+		mode = INIT;
 
 		int master_id = rx_data[0];
 		int semi_id = rx_data[1];
+    UNUSED(master_id);
+    UNUSED(semi_id);
 
 		if(receive_id == 0xf0){
 			stopAll();
