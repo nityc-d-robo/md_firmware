@@ -42,17 +42,23 @@ typedef struct {
 } LimitSwitch;
 typedef struct {
   int16_t target_rpm;
+  int16_t speeed;
+  int16_t pre_speed;
   int32_t p;
-  int32_t pre_error;
   int32_t i;
   int32_t d;
+  int32_t filterd_d;
+  int32_t pre_filterd_d;
   int16_t error;
 } PidController ;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define CPR 8192			//Count Per Rotation
+#define CPR 8192		//Count Per Rotation
+#define GEAR_RATIO 27
+#define ENCODER_DIRECTION -1
+
 #define SPEED_RATE 200  //control rate [Hz]
 #define CAN_SIZE 8		//CAN send data size[Byte]
 #define RETURN_SIZE 8	//CAN return data size[Byte]
@@ -80,16 +86,20 @@ PidController pid = {0};
 LimitSwitch lim_sw = {0};
 
 int16_t delta_rpm = 0;
+int16_t delta_cnt = 0;
 
 uint32_t id_own = 0u;
 
 // livewatch
 int16_t power = 0;
 
-// PID constant
+// PID Gain
 int16_t Kp = 1;
-int16_t Ki = 1;
-int16_t Kd = 1;
+int16_t Ki = 200;
+float Kd = 0;
+
+// Low-Pass Filter constant
+float LPF_a = 0.1;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -469,20 +479,32 @@ void simplePWM(int16_t power_){
 }
 void rotateSpeed(int16_t target_rpm) {
   pre_encoder = encoder;
+
   encoder.cnt = __HAL_TIM_GET_COUNTER(&htim2);
-  encoder.fusion_cnt = encoder.cnt + encoder.overflow*ENCODER_COUNTERPERIOD;
-  delta_rpm = (encoder.fusion_cnt - pre_encoder.fusion_cnt) * 60 / CPR * SPEED_RATE;
+  encoder.fusion_cnt = encoder.cnt + encoder.overflow * ENCODER_COUNTERPERIOD;
+  delta_cnt = encoder.fusion_cnt - pre_encoder.fusion_cnt;
+  delta_rpm = (delta_cnt * 60 * SPEED_RATE) / (CPR * GEAR_RATIO);
+
   if(pid.i > 999) {
     pid.i = 999;
   } else if(pid.i < -999) {
     pid.i = -999;
   }
-  pid.pre_error = pid.error;
+
+  pid.pre_filterd_d = pid.filterd_d;
+
   pid.error = target_rpm - delta_rpm;
+
   pid.p = Kp * pid.error;
-  pid.i += Ki * pid.error;
-  pid.d = Kd * (pid.error - pid.pre_error) / 0.005;
+
+  pid.i += (int)(Ki * pid.error) / SPEED_RATE;
+
+  pid.d = Kd * (pid.pre_speed - pid.speeed) * SPEED_RATE;
+  pid.filterd_d = LPF_a * pid.d + (1 - LPF_a) * pid.pre_filterd_d;
+
   power = pid.p + pid.i + pid.d;
+
+  power = power * ENCODER_DIRECTION;
   simplePWM(power);
 }
 
@@ -492,9 +514,9 @@ void returnStatus(uint8_t master_id_){
 	uint8_t tx_datas[RETURN_SIZE];
 
 	int64_t angle = encoder.fusion_cnt % CPR;	//calculate encoder angle
-  int16_t rpm = (encoder.fusion_cnt - pre_encoder.fusion_cnt) * 60 / CPR * SPEED_RATE;
+  // int16_t rpm = (encoder.fusion_cnt - pre_encoder.fusion_cnt) * 60 / CPR * SPEED_RATE;
 
-	while(HAL_CAN_GetTxMailboxesFreeLevel(&hcan) <= 0);
+	//while(HAL_CAN_GetTxMailboxesFreeLevel(&hcan) <= 0);
 
 	tx_header.StdId = master_id_;
 	tx_header.RTR = CAN_RTR_DATA;
@@ -503,13 +525,13 @@ void returnStatus(uint8_t master_id_){
 	tx_header.TransmitGlobalTime = DISABLE;
 	tx_datas[0] = (uint8_t)((angle >> 8) & 0xff);
 	tx_datas[1] = (uint8_t)(angle & 0xff);
-	tx_datas[2] = (uint8_t)((rpm >> 8) & 0xff);
-	tx_datas[3] = (uint8_t)(rpm & 0xff);
+	// tx_datas[2] = (uint8_t)((rpm >> 8) & 0xff);
+	// tx_datas[3] = (uint8_t)(rpm & 0xff);
 	tx_datas[4] = (uint8_t)(!HAL_GPIO_ReadPin(SW0_GPIO_Port, SW0_Pin));
 	tx_datas[5] = (uint8_t)(!HAL_GPIO_ReadPin(SW1_GPIO_Port, SW1_Pin));
 	tx_datas[6] = (uint8_t)((id_own >> 21) & 0xff);
 	tx_datas[7] = 0;
-	HAL_CAN_AddTxMessage(&hcan, &tx_header, tx_datas, &tx_mailbox);
+	//HAL_CAN_AddTxMessage(&hcan, &tx_header, tx_datas, &tx_mailbox);
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
