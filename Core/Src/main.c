@@ -57,7 +57,7 @@ typedef struct {
 /* USER CODE BEGIN PD */
 #define CPR 8192		//Count Per Rotation
 #define GEAR_RATIO 27
-#define ENCODER_DIRECTION -1
+#define ENCODER_DIRECTION 1
 
 #define SPEED_RATE 200  //control rate [Hz]
 #define CAN_SIZE 8		//CAN send data size[Byte]
@@ -94,7 +94,7 @@ uint32_t id_own = 0u;
 int16_t power = 0;
 
 // PID Gain
-int16_t Kp = 1;
+int16_t Kp = 6;
 int16_t Ki = 200;
 float Kd = 0;
 
@@ -415,8 +415,8 @@ static void MX_TIM16_Init(void)
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
-/* USER CODE BEGIN MX_GPIO_Init_1 */
-/* USER CODE END MX_GPIO_Init_1 */
+  /* USER CODE BEGIN MX_GPIO_Init_1 */
+  /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOA_CLK_ENABLE();
@@ -463,8 +463,8 @@ static void MX_GPIO_Init(void)
   HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI1_IRQn);
 
-/* USER CODE BEGIN MX_GPIO_Init_2 */
-/* USER CODE END MX_GPIO_Init_2 */
+  /* USER CODE BEGIN MX_GPIO_Init_2 */
+  /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
@@ -477,13 +477,18 @@ void simplePWM(int16_t power_){
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, (GPIO_PinState)phase);
 	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, (abs(power_) < 1000) ? abs(power_) : 999);
 }
-void rotateSpeed(int16_t target_rpm) {
-  pre_encoder = encoder;
 
+int16_t now_rpm() {
+  pre_encoder = encoder;
   encoder.cnt = __HAL_TIM_GET_COUNTER(&htim2);
   encoder.fusion_cnt = encoder.cnt + encoder.overflow * ENCODER_COUNTERPERIOD;
+
   delta_cnt = encoder.fusion_cnt - pre_encoder.fusion_cnt;
   delta_rpm = (delta_cnt * 60 * SPEED_RATE) / (CPR * GEAR_RATIO);
+  return delta_rpm;
+}
+void rotateSpeed(int16_t target_rpm) {
+  delta_rpm = now_rpm();
 
   if(pid.i > 999) {
     pid.i = 999;
@@ -514,9 +519,9 @@ void returnStatus(uint8_t master_id_){
 	uint8_t tx_datas[RETURN_SIZE];
 
 	int64_t angle = encoder.fusion_cnt % CPR;	//calculate encoder angle
-  // int16_t rpm = (encoder.fusion_cnt - pre_encoder.fusion_cnt) * 60 / CPR * SPEED_RATE;
+  int16_t rpm = (encoder.fusion_cnt - pre_encoder.fusion_cnt) * 60 / CPR * SPEED_RATE;
 
-	//while(HAL_CAN_GetTxMailboxesFreeLevel(&hcan) <= 0);
+	while(HAL_CAN_GetTxMailboxesFreeLevel(&hcan) <= 0);
 
 	tx_header.StdId = master_id_;
 	tx_header.RTR = CAN_RTR_DATA;
@@ -525,13 +530,13 @@ void returnStatus(uint8_t master_id_){
 	tx_header.TransmitGlobalTime = DISABLE;
 	tx_datas[0] = (uint8_t)((angle >> 8) & 0xff);
 	tx_datas[1] = (uint8_t)(angle & 0xff);
-	// tx_datas[2] = (uint8_t)((rpm >> 8) & 0xff);
-	// tx_datas[3] = (uint8_t)(rpm & 0xff);
+	tx_datas[2] = (uint8_t)((rpm >> 8) & 0xff);
+	tx_datas[3] = (uint8_t)(rpm & 0xff);
 	tx_datas[4] = (uint8_t)(!HAL_GPIO_ReadPin(SW0_GPIO_Port, SW0_Pin));
 	tx_datas[5] = (uint8_t)(!HAL_GPIO_ReadPin(SW1_GPIO_Port, SW1_Pin));
 	tx_datas[6] = (uint8_t)((id_own >> 21) & 0xff);
 	tx_datas[7] = 0;
-	//HAL_CAN_AddTxMessage(&hcan, &tx_header, tx_datas, &tx_mailbox);
+	// HAL_CAN_AddTxMessage(&hcan, &tx_header, tx_datas, &tx_mailbox);
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
@@ -552,7 +557,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
           rotateSpeed(pid.target_rpm);
           break;
       }
-      returnStatus(0x60);
+      // returnStatus(0x60);
     }
 }
 void HAL_GPIO_EXTI_Callback(uint16_t gpio_pin_){
@@ -592,12 +597,15 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan_){
 				case SPEED:
 					HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
           int16_t target_rpm = (int16_t)(rx_data[4]<<8 | rx_data[5]);
+          mode = SPEED;
           if(target_rpm == 0){
-            simplePWM(0);
+            pid.target_rpm = 0;
+            pid.error = 0;
+            pid.i = 0;
+            pid.p = 0;
+            pid.d = 0;
           }else {
             pid.target_rpm = target_rpm;
-					  rotateSpeed(pid.target_rpm);
-            mode = SPEED;
           }
 					break;
 				case LIM_SW:
