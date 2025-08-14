@@ -3,6 +3,7 @@ Release/
 .settings/
 .mxproject
 *.launch
+.vscode/
 
 CMakeLists.txt.user
 CMakeCache.txt
