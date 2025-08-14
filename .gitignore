@@ -1,3 +1,5 @@
+build/
+cmake/
 Debug/
 Release/
 .settings/

@@ -7,7 +7,7 @@
   ******************************************************************************
   * @attention
   *
-  * Copyright (c) 2024 STMicroelectronics.
+  * Copyright (c) 2025 STMicroelectronics.
   * All rights reserved.
   *
   * This software is licensed under terms that can be found in the LICENSE file
@@ -27,7 +27,7 @@ extern "C" {
 #endif
 
 /* Includes ------------------------------------------------------------------*/
-#include "stm32f3xx_hal.h"
+#include "stm32g4xx_hal.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -49,8 +49,6 @@ extern "C" {
 
 /* USER CODE END EM */
 
-void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
-
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
 
@@ -59,24 +57,39 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define MODE0_Pin GPIO_PIN_0
-#define MODE0_GPIO_Port GPIOA
-#define MODE1_Pin GPIO_PIN_1
-#define MODE1_GPIO_Port GPIOA
-#define MODE2_Pin GPIO_PIN_2
-#define MODE2_GPIO_Port GPIOA
-#define MODE3_Pin GPIO_PIN_3
-#define MODE3_GPIO_Port GPIOA
-#define LED_Pin GPIO_PIN_5
-#define LED_GPIO_Port GPIOA
-#define SW0_Pin GPIO_PIN_0
-#define SW0_GPIO_Port GPIOB
-#define SW0_EXTI_IRQn EXTI0_IRQn
-#define SW1_Pin GPIO_PIN_1
-#define SW1_GPIO_Port GPIOB
-#define SW1_EXTI_IRQn EXTI1_IRQn
-#define Z_Pin GPIO_PIN_10
-#define Z_GPIO_Port GPIOA
+#define FORWORD_SW_Pin GPIO_PIN_0
+#define FORWORD_SW_GPIO_Port GPIOF
+#define FORWORD_LED_Pin GPIO_PIN_1
+#define FORWORD_LED_GPIO_Port GPIOF
+#define SW2_BIT0_Pin GPIO_PIN_0
+#define SW2_BIT0_GPIO_Port GPIOA
+#define SW2_BIT1_Pin GPIO_PIN_1
+#define SW2_BIT1_GPIO_Port GPIOA
+#define SW2_BIT2_Pin GPIO_PIN_2
+#define SW2_BIT2_GPIO_Port GPIOA
+#define SW2_BIT3_Pin GPIO_PIN_3
+#define SW2_BIT3_GPIO_Port GPIOA
+#define REVERSE_SW_Pin GPIO_PIN_4
+#define REVERSE_SW_GPIO_Port GPIOA
+#define REVERSE_SW_EXTI_IRQn EXTI4_IRQn
+#define REVERSE_LED_Pin GPIO_PIN_5
+#define REVERSE_LED_GPIO_Port GPIOA
+#define STATE_LED_Pin GPIO_PIN_7
+#define STATE_LED_GPIO_Port GPIOA
+#define Z_Pin GPIO_PIN_0
+#define Z_GPIO_Port GPIOB
+#define ENCODER_A_Pin GPIO_PIN_8
+#define ENCODER_A_GPIO_Port GPIOA
+#define ENCODER_B_Pin GPIO_PIN_9
+#define ENCODER_B_GPIO_Port GPIOA
+#define PHASE_Pin GPIO_PIN_5
+#define PHASE_GPIO_Port GPIOB
+#define LIMIT_SW1_Pin GPIO_PIN_6
+#define LIMIT_SW1_GPIO_Port GPIOB
+#define LIMIT_SW1_EXTI_IRQn EXTI9_5_IRQn
+#define LIMIT_SW2_Pin GPIO_PIN_7
+#define LIMIT_SW2_GPIO_Port GPIOB
+#define LIMIT_SW2_EXTI_IRQn EXTI9_5_IRQn
 
 /* USER CODE BEGIN Private defines */
 
