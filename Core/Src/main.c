@@ -57,7 +57,7 @@ typedef struct {
 /* USER CODE BEGIN PD */
 #define CPR 8192		//Count Per Rotation
 #define GEAR_RATIO 54
-#define ENCODER_DIRECTION 1
+#define ENCODER_DIRECTION -1
 
 #define SPEED_RATE 200  //control rate [Hz]
 #define CAN_SIZE 8		//CAN send data size[Byte]
