@@ -19,3 +19,5 @@ _deps
 CMakeUserPresets.json
 
 build.ninja
+
+!build/Debug/md_firmware.elf
