@@ -1,4 +1,8 @@
-Debug/
+build/*
+!build/Debug/
+build/Debug/*
+!build/Debug/md_firmware.elf
+
 Release/
 .settings/
 .mxproject
@@ -19,5 +23,3 @@ _deps
 CMakeUserPresets.json
 
 build.ninja
-
-!build/Debug/md_firmware.elf
