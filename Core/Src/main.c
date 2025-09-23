@@ -56,7 +56,7 @@ typedef struct {
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define CPR 8192		//Count Per Rotation
-#define GEAR_RATIO 27
+#define GEAR_RATIO 54
 #define ENCODER_DIRECTION 1
 
 #define SPEED_RATE 200  //control rate [Hz]
@@ -649,8 +649,7 @@ void Error_Handler(void)
   }
   /* USER CODE END Error_Handler_Debug */
 }
-
-#ifdef  USE_FULL_ASSERT
+#ifdef USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
   *         where the assert_param error has occurred.
